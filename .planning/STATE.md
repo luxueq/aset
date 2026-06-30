@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-06-30)
 
 **Core value:** 让任何 AI Agent 都能通过统一网关安全、高效、可观测地运行和协作
-**Current focus:** Phase 1 — Core Gateway
+**Current focus:** Phase 1 — Core Gateway (Context gathered, ready for planning)
 
 ## Current Phase
 
-**Phase 1: Core Gateway** — Status: Not Started
+**Phase 1: Core Gateway** — Status: Context Gathered (Ready for Planning)
 
 ## Progress
 
 | Phase | Name | Status | Notes |
 |-------|------|--------|-------|
-| 1 | Core Gateway | Not Started | 统一代理 + 路由 + 限流 + 缓存 |
+| 1 | Core Gateway | Context Gathered | 41 decisions captured, ready for /gsd:plan-phase 1 |
 | 2 | SSE Agent Runtime | Not Started | 流式转发 + 背压控制 |
 | 3 | MCP Server | Not Started | MCP 协议 + Tool 注册 |
 | 4 | Observability | Not Started | OTel + Prometheus + 成本追踪 |
@@ -36,6 +36,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 | 2026-06-30 | SDK 优先 Java + Go | 团队主力技术栈 |
 | 2026-06-30 | OTel→Prometheus→ClickHouse | 渐进式可观测性 |
 | 2026-06-30 | Vertical MVP 模式 | 每阶段交付端到端能力 |
+| 2026-06-30 | Phase 1 Context (41 decisions) | 见 01-CONTEXT.md |
+
+## Resume
+
+To resume work on this project, read: `.planning/phases/01-core-gateway/01-CONTEXT.md`
 
 ---
-*Last updated: 2026-06-30*
+*Last updated: 2026-06-30 after Phase 1 context discussion*
