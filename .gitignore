@@ -1,0 +1,25 @@
+# Binaries
+aigateway
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# IDE
+.idea/
+
+# Build
+dist/
+build/
+
+# Testing
+coverage.out
+*.test
+
+# OS
+.DS_Store
+
+# Environment
+.env
+.env.local
