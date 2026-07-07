@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -13,10 +14,15 @@ import (
 	"github.com/luxueq/aigateway/internal/provider"
 )
 
+// Default API version per Anthropic's public documentation.
+const DefaultAPIVersion = "2023-06-01"
+
 // Provider implements the provider.Provider interface for Anthropic.
 type Provider struct {
-	baseURL string
-	apiKey  string
+	baseURL      string
+	apiKey       string
+	apiVersion   string            // anthropic-version header value
+	customHeaders map[string]string // extra headers from config
 }
 
 // NewAnthropicProvider creates a new Anthropic provider.
@@ -25,9 +31,34 @@ func NewAnthropicProvider(cfg *config.ProviderConfig) *Provider {
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com/v1"
 	}
+
+	apiVersion := DefaultAPIVersion
+	// Allow override via custom headers (e.g., headers.anthropic-version)
+	if cfg.Headers != nil {
+		if v, ok := cfg.Headers["anthropic-version"]; ok {
+			apiVersion = v
+		}
+	}
+
+	// Collect extra headers (excluding anthropic-version, x-api-key, content-type)
+	var extraHeaders map[string]string
+	if cfg.Headers != nil {
+		extraHeaders = make(map[string]string)
+		for k, v := range cfg.Headers {
+			switch k {
+			case "anthropic-version", "x-api-key", "content-type", "authorization":
+				continue // these are handled separately
+			default:
+				extraHeaders[k] = v
+			}
+		}
+	}
+
 	return &Provider{
-		baseURL: baseURL,
-		apiKey:  cfg.APIKey,
+		baseURL:       baseURL,
+		apiKey:        cfg.APIKey,
+		apiVersion:    apiVersion,
+		customHeaders: extraHeaders,
 	}
 }
 
@@ -52,7 +83,12 @@ func (p *Provider) ConvertRequest(ctx context.Context, req *provider.CanonicalRe
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.apiKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("anthropic-version", p.apiVersion)
+
+	// Apply custom headers (e.g., anthropic-beta, user-agent)
+	for k, v := range p.customHeaders {
+		httpReq.Header.Set(k, v)
+	}
 
 	return httpReq, nil
 }
@@ -63,16 +99,22 @@ func (p *Provider) convertToAnthropic(req *provider.CanonicalRequest) *anthropic
 		Stream:  req.Stream,
 	}
 
-	// Extract system message
+	// Extract system message(s) — merge multiple into one
+	var systemParts []string
 	for _, msg := range req.Messages {
 		if msg.Role == "system" {
-			anthReq.System = msg.Content
+			systemParts = append(systemParts, msg.Content)
 			continue
 		}
 		anthReq.Messages = append(anthReq.Messages, anthropicMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
 		})
+	}
+
+	// Merge multiple system messages into one
+	if len(systemParts) > 0 {
+		anthReq.System = strings.Join(systemParts, "\n\n")
 	}
 
 	if req.MaxTokens != nil {
@@ -88,7 +130,7 @@ func (p *Provider) convertToAnthropic(req *provider.CanonicalRequest) *anthropic
 	return anthReq
 }
 
-func (p *Provider) StreamAdapter(body provider.ReadCloser) <-chan *provider.CanonicalChunk {
+func (p *Provider) StreamAdapter(body io.ReadCloser) <-chan *provider.CanonicalChunk {
 	ch := make(chan *provider.CanonicalChunk)
 
 	go func() {

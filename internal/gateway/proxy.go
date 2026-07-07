@@ -39,12 +39,14 @@ func NewProxy(cfg *config.Config, log *zap.Logger) *Proxy {
 		providers: make(map[string]provider.Provider),
 	}
 
-	// Register default providers
-	if cfg.Providers.OpenAI != nil {
-		p.providers["openai"] = openai.NewOpenAIProvider(cfg.Providers.OpenAI)
-	}
-	if cfg.Providers.Anthropic != nil {
-		p.providers["anthropic"] = anthropic.NewAnthropicProvider(cfg.Providers.Anthropic)
+	// Register configured providers
+	if cfg.Providers != nil {
+		if cfg.Providers.OpenAI != nil {
+			p.providers["openai"] = openai.NewOpenAIProvider(cfg.Providers.OpenAI)
+		}
+		if cfg.Providers.Anthropic != nil {
+			p.providers["anthropic"] = anthropic.NewAnthropicProvider(cfg.Providers.Anthropic)
+		}
 	}
 
 	return p

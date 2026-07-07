@@ -8,7 +8,6 @@ import (
 )
 
 func TestLoad_DefaultValues(t *testing.T) {
-	// Create a minimal config file
 	tmpDir := t.TempDir()
 	cfgFile := filepath.Join(tmpDir, "config.yaml")
 	err := os.WriteFile(cfgFile, []byte(`
@@ -31,36 +30,52 @@ logging:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	// Check server config
+	// Required: Server (value type)
 	if cfg.Server.Port != 9090 {
 		t.Errorf("Server.Port = %d, want 9090", cfg.Server.Port)
 	}
-
-	// Check defaults for unset values
 	if cfg.Server.ReadTimeout != 30*time.Second {
 		t.Errorf("Server.ReadTimeout = %v, want 30s", cfg.Server.ReadTimeout)
 	}
-	if cfg.Server.WriteTimeout != 120*time.Second {
-		t.Errorf("Server.WriteTimeout = %v, want 120s", cfg.Server.WriteTimeout)
+	if cfg.Server.GracefulShutdown != 30*time.Second {
+		t.Errorf("Server.GracefulShutdown = %v, want 30s", cfg.Server.GracefulShutdown)
 	}
 
-	// Check provider config
+	// Required: Logging (value type)
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "debug")
+	}
+	if !cfg.Logging.SanitizeKeys {
+		t.Error("Logging.SanitizeKeys should default to true")
+	}
+
+	// Optional: Providers (pointer type)
+	if cfg.Providers == nil {
+		t.Fatal("Providers is nil, expected non-nil since openai is configured")
+	}
 	if cfg.Providers.OpenAI == nil {
 		t.Fatal("Providers.OpenAI is nil")
 	}
 	if cfg.Providers.OpenAI.BaseURL != "https://api.openai.com/v1" {
 		t.Errorf("OpenAI.BaseURL = %q, want %q", cfg.Providers.OpenAI.BaseURL, "https://api.openai.com/v1")
 	}
-	if cfg.Providers.OpenAI.APIKey != "test-key" {
-		t.Errorf("OpenAI.APIKey = %q, want %q", cfg.Providers.OpenAI.APIKey, "test-key")
+	if cfg.Providers.Anthropic != nil {
+		t.Error("Providers.Anthropic should be nil (not configured)")
 	}
 
-	// Check logging config
-	if cfg.Logging.Level != "debug" {
-		t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "debug")
+	// Optional: Database (pointer type, nil = not configured)
+	if cfg.Database != nil {
+		t.Error("Database should be nil (not configured in yaml)")
 	}
-	if cfg.Logging.Format != "json" {
-		t.Errorf("Logging.Format = %q, want %q", cfg.Logging.Format, "json")
+
+	// Optional: Redis (pointer type, nil = not configured)
+	if cfg.Redis != nil {
+		t.Error("Redis should be nil (not configured in yaml)")
+	}
+
+	// Optional: Cache (pointer type, nil = not configured)
+	if cfg.Cache != nil {
+		t.Error("Cache should be nil (not configured in yaml)")
 	}
 }
 
@@ -75,7 +90,6 @@ server:
 		t.Fatal(err)
 	}
 
-	// Set environment variable to override port
 	os.Setenv("AIGATEWAY_SERVER_PORT", "9999")
 	defer os.Unsetenv("AIGATEWAY_SERVER_PORT")
 
@@ -99,7 +113,6 @@ func TestLoad_MissingFile(t *testing.T) {
 func TestLoad_DefaultPort(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgFile := filepath.Join(tmpDir, "config.yaml")
-	// Minimal config without port
 	err := os.WriteFile(cfgFile, []byte(`
 logging:
   level: info
@@ -115,5 +128,114 @@ logging:
 
 	if cfg.Server.Port != 8080 {
 		t.Errorf("Server.Port = %d, want 8080 (default)", cfg.Server.Port)
+	}
+}
+
+func TestLoad_OptionalSectionsNil(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(cfgFile, []byte(`
+server:
+  port: 8080
+logging:
+  level: info
+  format: json
+`), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// All optional sections should be nil when not in yaml
+	if cfg.Providers != nil {
+		t.Error("Providers should be nil")
+	}
+	if cfg.Database != nil {
+		t.Error("Database should be nil")
+	}
+	if cfg.Redis != nil {
+		t.Error("Redis should be nil")
+	}
+	if cfg.Cache != nil {
+		t.Error("Cache should be nil")
+	}
+	if cfg.RateLimit != nil {
+		t.Error("RateLimit should be nil")
+	}
+}
+
+func TestLoad_WithAllOptionalSections(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(cfgFile, []byte(`
+server:
+  port: 8080
+logging:
+  level: info
+  format: json
+providers:
+  openai:
+    base_url: "https://api.openai.com/v1"
+    api_key: "sk-test"
+    weight: 10
+    cost_per_1k: 0.03
+database:
+  url: "postgres://localhost:5432/aigateway"
+  max_open_conns: 50
+redis:
+  url: "redis://localhost:6379"
+  pool_size: 30
+cache:
+  enabled: true
+  ttl: 10m
+  max_items: 5000
+rate_limit:
+  enabled: true
+  tokens_per_sec: 1000
+  burst_size: 100
+`), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Verify all optional sections are non-nil
+	if cfg.Providers == nil {
+		t.Fatal("Providers should not be nil")
+	}
+	if cfg.Database == nil {
+		t.Fatal("Database should not be nil")
+	}
+	if cfg.Database.URL != "postgres://localhost:5432/aigateway" {
+		t.Errorf("Database.URL = %q", cfg.Database.URL)
+	}
+	if cfg.Database.MaxOpenConns != 50 {
+		t.Errorf("Database.MaxOpenConns = %d, want 50", cfg.Database.MaxOpenConns)
+	}
+	if cfg.Redis == nil {
+		t.Fatal("Redis should not be nil")
+	}
+	if cfg.Redis.PoolSize != 30 {
+		t.Errorf("Redis.PoolSize = %d, want 30", cfg.Redis.PoolSize)
+	}
+	if cfg.Cache == nil {
+		t.Fatal("Cache should not be nil")
+	}
+	if cfg.Cache.MaxItems != 5000 {
+		t.Errorf("Cache.MaxItems = %d, want 5000", cfg.Cache.MaxItems)
+	}
+	if cfg.RateLimit == nil {
+		t.Fatal("RateLimit should not be nil")
+	}
+	if cfg.RateLimit.TokensPerSec != 1000 {
+		t.Errorf("RateLimit.TokensPerSec = %d, want 1000", cfg.RateLimit.TokensPerSec)
 	}
 }

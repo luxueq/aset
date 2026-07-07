@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -15,8 +16,9 @@ import (
 
 // Provider implements the provider.Provider interface for OpenAI.
 type Provider struct {
-	baseURL string
-	apiKey  string
+	baseURL       string
+	apiKey        string
+	customHeaders map[string]string
 }
 
 // NewOpenAIProvider creates a new OpenAI provider.
@@ -25,9 +27,25 @@ func NewOpenAIProvider(cfg *config.ProviderConfig) *Provider {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
+
+	// Collect custom headers (excluding auth and content-type)
+	var customHeaders map[string]string
+	if cfg.Headers != nil {
+		customHeaders = make(map[string]string)
+		for k, v := range cfg.Headers {
+			switch k {
+			case "authorization", "content-type":
+				continue // these are handled separately
+			default:
+				customHeaders[k] = v
+			}
+		}
+	}
+
 	return &Provider{
-		baseURL: baseURL,
-		apiKey:  cfg.APIKey,
+		baseURL:       baseURL,
+		apiKey:        cfg.APIKey,
+		customHeaders: customHeaders,
 	}
 }
 
@@ -50,10 +68,15 @@ func (p *Provider) ConvertRequest(ctx context.Context, req *provider.CanonicalRe
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 
+	// Apply custom headers (e.g., OpenAI-Organization, user-agent)
+	for k, v := range p.customHeaders {
+		httpReq.Header.Set(k, v)
+	}
+
 	return httpReq, nil
 }
 
-func (p *Provider) StreamAdapter(body provider.ReadCloser) <-chan *provider.CanonicalChunk {
+func (p *Provider) StreamAdapter(body io.ReadCloser) <-chan *provider.CanonicalChunk {
 	ch := make(chan *provider.CanonicalChunk)
 
 	go func() {

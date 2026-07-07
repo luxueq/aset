@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"io"
 	"net/http"
 )
 
@@ -15,13 +16,7 @@ type Provider interface {
 
 	// StreamAdapter parses a streaming response body into canonical chunks.
 	// Returns a channel that emits chunks and closes when the stream ends.
-	StreamAdapter(body ReadCloser) <-chan *CanonicalChunk
-}
-
-// ReadCloser is an alias for io.ReadCloser to avoid circular imports.
-type ReadCloser interface {
-	Read(p []byte) (n int, err error)
-	Close() error
+	StreamAdapter(body io.ReadCloser) <-chan *CanonicalChunk
 }
 
 // CanonicalRequest represents a normalized request across all providers.
