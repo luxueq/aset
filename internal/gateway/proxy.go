@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,10 +18,11 @@ import (
 
 // Proxy handles HTTP requests and forwards them to AI model providers.
 type Proxy struct {
-	httpClient *http.Client
-	config     *config.Config
-	logger     *zap.Logger
-	providers  map[string]provider.Provider
+	httpClient  *http.Client
+	config      *config.Config
+	logger      *zap.Logger
+	providers   map[string]provider.Provider
+	retryConfig RetryConfig
 }
 
 // NewProxy creates a new Proxy instance.
@@ -34,9 +36,10 @@ func NewProxy(cfg *config.Config, log *zap.Logger) *Proxy {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		config:    cfg,
-		logger:    log,
-		providers: make(map[string]provider.Provider),
+		config:      cfg,
+		logger:      log,
+		providers:   make(map[string]provider.Provider),
+		retryConfig: DefaultRetryConfig(),
 	}
 
 	// Register configured providers
@@ -113,8 +116,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Forward request to provider
-	resp, err := p.httpClient.Do(httpReq)
+	// Forward request to provider with retry
+	resp, err := p.doWithRetry(r.Context(), httpReq)
 	if err != nil {
 		p.logger.Error("upstream request failed",
 			zap.String("provider", providerName),
@@ -166,6 +169,70 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response) {
 			break
 		}
 	}
+}
+
+// doWithRetry executes an HTTP request with automatic retry on retryable failures.
+func (p *Proxy) doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
+	cfg := p.retryConfig
+
+	var lastResp *http.Response
+	var lastErr error
+
+	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		// Clone request body for retry (original body is consumed after Do)
+		if attempt > 0 {
+			if req.GetBody == nil {
+				p.logger.Warn("cannot retry: request body not replayable",
+					zap.Int("attempt", attempt))
+				return lastResp, lastErr
+			}
+			body, err := req.GetBody()
+			if err != nil {
+				return lastResp, lastErr
+			}
+			req.Body = body
+		}
+
+		resp, err := p.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			p.logger.Warn("upstream request failed",
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", cfg.MaxRetries),
+				zap.Error(err))
+		} else {
+			// Non-retryable status: return immediately
+			if !cfg.shouldRetry(resp.StatusCode) {
+				return resp, nil
+			}
+			// Retryable status: close body and retry
+			lastResp = resp
+			p.logger.Warn("upstream returned retryable status",
+				zap.Int("status", resp.StatusCode),
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", cfg.MaxRetries))
+			resp.Body.Close()
+		}
+
+		// Wait before next retry (skip on last attempt)
+		if attempt < cfg.MaxRetries {
+			backoff := cfg.backoff(attempt)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return lastResp, nil
 }
 
 func (p *Proxy) writeError(w http.ResponseWriter, status int, errType, message string) {
