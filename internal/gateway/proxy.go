@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -282,30 +281,5 @@ func isStreaming(body map[string]interface{}) bool {
 	return ok && stream
 }
 
-// Helper to create request body from canonical request
-func buildRequestBody(canonical *provider.CanonicalRequest) ([]byte, error) {
-	body := map[string]interface{}{
-		"model":    canonical.Model,
-		"messages": canonical.Messages,
-	}
-	if canonical.Stream {
-		body["stream"] = true
-	}
-	if canonical.Temperature != nil {
-		body["temperature"] = *canonical.Temperature
-	}
-	if canonical.MaxTokens != nil {
-		body["max_tokens"] = *canonical.MaxTokens
-	}
-	return json.Marshal(body)
-}
-
 // Ensure Proxy implements http.Handler
 var _ http.Handler = (*Proxy)(nil)
-
-// io.ReadAll helper (to avoid importing io twice in the example)
-func readAll(r io.Reader) ([]byte, error) {
-	var buf bytes.Buffer
-	_, err := io.Copy(&buf, r)
-	return buf.Bytes(), err
-}

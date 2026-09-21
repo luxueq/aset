@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,6 +16,27 @@ import (
 	"github.com/luxueq/aigateway/internal/gateway"
 	"go.uber.org/zap"
 )
+
+// serverState tracks the draining flag used during graceful shutdown.
+// Once draining is set, new requests are rejected so load balancers
+// can route traffic elsewhere while in-flight requests complete.
+type serverState struct {
+	draining atomic.Bool
+}
+
+// rejectWhenDraining wraps a handler and rejects new requests with 503
+// once the server has started draining.
+func (s *serverState) rejectWhenDraining(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.draining.Load() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":{"message":"server is shutting down","type":"server_error"}}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func main() {
 	// Load configuration
@@ -58,9 +80,12 @@ func main() {
 	proxy := gateway.NewProxy(cfg, log)
 
 	// Setup HTTP server
+	state := &serverState{}
 	mux := http.NewServeMux()
 
 	// Health check endpoints (no auth required)
+	// During drain, the rejectWhenDraining middleware returns 503 for all
+	// endpoints including /health, so LB/K8s stop routing new traffic.
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /ready", readyHandler(cfg))
 
@@ -77,7 +102,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:      mux,
+		Handler:      state.rejectWhenDraining(mux),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
@@ -91,7 +116,7 @@ func main() {
 	}()
 
 	// Graceful shutdown
-	gracefulShutdown(server, log)
+	gracefulShutdown(server, log, state)
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +134,7 @@ func readyHandler(cfg *config.Config) http.HandlerFunc {
 	}
 }
 
-func gracefulShutdown(server *http.Server, log *zap.Logger) {
+func gracefulShutdown(server *http.Server, log *zap.Logger, state *serverState) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
@@ -117,8 +142,9 @@ func gracefulShutdown(server *http.Server, log *zap.Logger) {
 
 	log.Info("shutdown signal received, starting graceful shutdown")
 
-	// Mark unhealthy (LB/K8s stops routing new traffic)
-	// In production, we'd set a global flag here
+	// Mark unhealthy: LB/K8s stops routing new traffic and the server
+	// rejects any new requests that still arrive.
+	state.draining.Store(true)
 
 	// Wait for endpoint removal to propagate
 	time.Sleep(5 * time.Second)
