@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-09-21T06:11:50.470Z"
+status: in_progress
+last_updated: "2026-09-21T06:35:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 6
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -23,13 +23,13 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Phase
 
-**Phase 1: Core Gateway** — Status: In Progress (1/6 plans complete)
+**Phase 1: Core Gateway** — Status: In Progress (2/6 plans complete)
 
 ## Progress
 
 | Phase | Name | Status | Notes |
 |-------|------|--------|-------|
-| 1 | Core Gateway | In Progress | 01-01 complete (skeleton + reverse proxy + drain-aware shutdown); 01-02~01-06 pending |
+| 1 | Core Gateway | In Progress | 01-01, 01-02 complete (skeleton, reverse proxy, provider adapters, error/param/retry verified+tested); 01-03~01-06 pending |
 | 2 | SSE Agent Runtime | Not Started | 流式转发 + 背压控制 |
 | 3 | MCP Server | Not Started | MCP 协议 + Tool 注册 |
 | 4 | Observability | Not Started | OTel + Prometheus + 成本追踪 |
@@ -52,10 +52,13 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 | 2026-06-30 | Vertical MVP 模式 | 每阶段交付端到端能力 |
 | 2026-06-30 | Phase 1 Context (41 decisions) | 见 01-CONTEXT.md |
 | 2026-09-21 | 01-01: Drain rejection as mux-wrapping middleware | 单一 503 来源，atomic flag，避免 per-handler 状态 |
+| 2026-09-21 | 01-02: 4-method Provider interface（无 ParseResponse/SupportsCapability） | 流式转发为原样字节透传，无归一化需求即无接口负担 |
+| 2026-09-21 | 01-02: provider/model 前缀在 proxy 层 parseModel 剥离 | D-11 路由语义在入口统一处理，adapter 收到纯模型名 |
+| 2026-09-21 | 01-02: 01-02 只补测试不改实现 | Wave 1 实现已满足全部验收标准，测试固化行为防回归 |
 
 ## Resume
 
-To resume work on this project, read: `.planning/phases/01-core-gateway/01-01-SUMMARY.md`（下一计划：01-02-PLAN.md）
+To resume work on this project, read: `.planning/phases/01-core-gateway/01-02-SUMMARY.md`（下一计划：01-03-PLAN.md）
 
 ---
-*Last updated: 2026-09-21 after completing 01-01 (skeleton + basic reverse proxy)*
+*Last updated: 2026-09-21 after completing 01-02 (provider adapter framework + OpenAI/Anthropic)*

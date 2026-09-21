@@ -126,7 +126,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GW-01 ~ GW-13 | Phase 1 | Pending |
+| GW-01 ~ GW-13 | Phase 1 | In Progress (GW-01, GW-11 done) |
 | SSE-01 ~ SSE-05 | Phase 2 | Pending |
 | MCP-01 ~ MCP-06 | Phase 3 | Pending |
 | OBS-01 ~ OBS-07 | Phase 4 | Pending |
@@ -143,4 +143,4 @@
 
 ---
 *Requirements defined: 2026-06-30*
-*Last updated: 2026-06-30 after initial definition*
+*Last updated: 2026-09-21 after 01-02 (GW-11 verified — provider adapters live)*
