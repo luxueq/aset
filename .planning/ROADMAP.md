@@ -12,7 +12,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | Core Gateway | 统一代理 + 路由 + 限流 + 缓存 | GW-01~13 (13) | 可通过统一端点调用 OpenAI/Claude/Gemini/国产模型 |
+| 1 | Core Gateway | 1/6 | In Progress|  |
 | 2 | SSE Agent Runtime | 流式转发 + 背压控制 + 重连 | SSE-01~05 (5) | 数十万并发 SSE 连接稳定运行 |
 | 3 | MCP Server | MCP 协议实现 + Tool 注册 | MCP-01~06 (6) | LLM 可通过 MCP 协议调用注册的 Tool |
 | 4 | Observability | 可观测性 + 成本追踪 | OBS-01~07 (7) | Grafana 可视化 token 用量/成本/延迟 |

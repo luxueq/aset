@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-09-21T06:03:04.749Z"
+last_updated: "2026-09-21T06:11:50.470Z"
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -23,13 +23,13 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Phase
 
-**Phase 1: Core Gateway** — Status: Context Gathered (Ready for Planning)
+**Phase 1: Core Gateway** — Status: In Progress (1/6 plans complete)
 
 ## Progress
 
 | Phase | Name | Status | Notes |
 |-------|------|--------|-------|
-| 1 | Core Gateway | Context Gathered | 41 decisions captured, ready for /gsd:plan-phase 1 |
+| 1 | Core Gateway | In Progress | 01-01 complete (skeleton + reverse proxy + drain-aware shutdown); 01-02~01-06 pending |
 | 2 | SSE Agent Runtime | Not Started | 流式转发 + 背压控制 |
 | 3 | MCP Server | Not Started | MCP 协议 + Tool 注册 |
 | 4 | Observability | Not Started | OTel + Prometheus + 成本追踪 |
@@ -51,10 +51,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 | 2026-06-30 | OTel→Prometheus→ClickHouse | 渐进式可观测性 |
 | 2026-06-30 | Vertical MVP 模式 | 每阶段交付端到端能力 |
 | 2026-06-30 | Phase 1 Context (41 decisions) | 见 01-CONTEXT.md |
+| 2026-09-21 | 01-01: Drain rejection as mux-wrapping middleware | 单一 503 来源，atomic flag，避免 per-handler 状态 |
 
 ## Resume
 
-To resume work on this project, read: `.planning/phases/01-core-gateway/01-CONTEXT.md`
+To resume work on this project, read: `.planning/phases/01-core-gateway/01-01-SUMMARY.md`（下一计划：01-02-PLAN.md）
 
 ---
-*Last updated: 2026-06-30 after Phase 1 context discussion*
+*Last updated: 2026-09-21 after completing 01-01 (skeleton + basic reverse proxy)*
