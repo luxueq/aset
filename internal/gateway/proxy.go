@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/luxueq/aigateway/internal/provider"
 	"github.com/luxueq/aigateway/internal/provider/anthropic"
 	"github.com/luxueq/aigateway/internal/provider/openai"
+	"github.com/luxueq/aigateway/internal/router"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +24,8 @@ type Proxy struct {
 	config      *config.Config
 	logger      *zap.Logger
 	providers   map[string]provider.Provider
+	rt          *router.Router
+	failover    router.FailoverConfig
 	retryConfig RetryConfig
 }
 
@@ -38,6 +43,7 @@ func NewProxy(cfg *config.Config, log *zap.Logger) *Proxy {
 		config:      cfg,
 		logger:      log,
 		providers:   make(map[string]provider.Provider),
+		failover:    router.DefaultFailoverConfig(),
 		retryConfig: DefaultRetryConfig(),
 	}
 
@@ -51,7 +57,72 @@ func NewProxy(cfg *config.Config, log *zap.Logger) *Proxy {
 		}
 	}
 
+	p.initRouter(cfg)
+
 	return p
+}
+
+// initRouter builds the routing engine from config: provider status
+// entries (weight, cost), route rules, and failover settings.
+func (p *Proxy) initRouter(cfg *config.Config) {
+	rcfg := router.Config{}
+	if cfg.Routing != nil {
+		rcfg.DefaultStrategy = cfg.Routing.DefaultStrategy
+		rcfg.DefaultProvider = cfg.Routing.DefaultProvider
+		for _, rule := range cfg.Routing.Routes {
+			rcfg.Routes = append(rcfg.Routes, router.RouteRule{
+				Model:     rule.Model,
+				Providers: rule.Providers,
+				Strategy:  rule.Strategy,
+			})
+		}
+		if f := cfg.Routing.Failover; f != nil {
+			p.failover = router.FailoverConfig{
+				Enabled:       f.Enabled,
+				MaxProviders:  f.MaxProviders,
+				ReturnOnError: f.ReturnOnError,
+			}
+		}
+	}
+
+	p.rt = router.New(rcfg)
+
+	// Seed provider runtime status from provider config.
+	var statuses []*router.ProviderStatus
+	for name := range p.providers {
+		statuses = append(statuses, p.providerStatus(name))
+	}
+	p.rt.SetProviders(statuses)
+}
+
+// providerStatus builds the initial ProviderStatus for a configured
+// provider, pulling weight and cost hints from config.
+func (p *Proxy) providerStatus(name string) *router.ProviderStatus {
+	st := &router.ProviderStatus{
+		Name:    name,
+		Healthy: true,
+		Weight:  1,
+	}
+	if p.config.Providers != nil {
+		for _, pc := range p.config.Providers.All() {
+			if pc.Config == nil {
+				continue
+			}
+			if pc.Name == name {
+				if pc.Config.Weight > 0 {
+					st.Weight = pc.Config.Weight
+				}
+				st.CostPer1K = pc.Config.CostPer1K
+				break
+			}
+		}
+	}
+	return st
+}
+
+// Router exposes the routing engine (for health monitor wiring and tests).
+func (p *Proxy) Router() *router.Router {
+	return p.rt
 }
 
 // ServeHTTP handles incoming API requests.
@@ -76,25 +147,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	providerName, actualModel := parseModel(modelName)
-
-	prov, ok := p.providers[providerName]
-	if !ok {
-		p.writeError(w, http.StatusBadRequest, "invalid_request",
-			"unknown provider: "+providerName)
-		return
-	}
-
-	p.logger.Info("proxying request",
-		zap.String("provider", providerName),
-		zap.String("model", actualModel),
-		zap.String("method", r.Method),
-		zap.String("path", r.URL.Path),
-	)
-
-	// Convert to canonical request and then to provider-specific request
+	// Convert to canonical request
 	canonical := &provider.CanonicalRequest{
-		Model:    actualModel,
 		Messages: extractMessages(reqBody),
 		Stream:   isStreaming(reqBody),
 	}
@@ -107,26 +161,33 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		canonical.MaxTokens = &mt
 	}
 
-	// Convert to provider-specific request
-	httpReq, err := prov.ConvertRequest(r.Context(), canonical)
+	// Route (with failover) and forward to the selected provider.
+	resp, providerName, err := p.routeAndForward(r.Context(), modelName, canonical)
 	if err != nil {
-		p.writeError(w, http.StatusInternalServerError, "provider_error",
-			"failed to convert request: "+err.Error())
-		return
-	}
-
-	// Forward request to provider with retry
-	resp, err := p.doWithRetry(r.Context(), httpReq)
-	if err != nil {
-		p.logger.Error("upstream request failed",
-			zap.String("provider", providerName),
+		status := http.StatusBadGateway
+		errType := "provider_error"
+		switch {
+		case errors.Is(err, router.ErrAllProvidersFailed):
+			errType = "server_error"
+		case errors.Is(err, router.ErrNoHealthyProvider):
+			status = http.StatusServiceUnavailable
+			errType = "service_unavailable"
+		}
+		p.logger.Error("request routing failed",
+			zap.String("model", modelName),
 			zap.Error(err),
 		)
-		p.writeError(w, http.StatusBadGateway, "provider_error",
-			"upstream request failed: "+err.Error())
+		p.writeError(w, status, errType, err.Error())
 		return
 	}
 	defer resp.Body.Close()
+
+	p.logger.Info("proxying request",
+		zap.String("provider", providerName),
+		zap.String("model", canonical.Model),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
 
 	// Set response headers
 	for key, values := range resp.Header {
@@ -144,6 +205,84 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 	}
+}
+
+// routeAndForward selects a provider via the routing engine (with
+// failover) and forwards the canonical request to it.
+// Returns the upstream response, the provider that served it, or a
+// terminal error (wrapped ErrAllProvidersFailed or ErrNoHealthyProvider).
+func (p *Proxy) routeAndForward(ctx context.Context, model string, canonical *provider.CanonicalRequest) (*http.Response, string, error) {
+	// Adapters expect the bare model name; the router consumes the full
+	// "provider/model" string for pool resolution.
+	canonicalForProvider := *canonical
+	canonicalForProvider.Model = bareModel(model)
+
+	var lastResp *http.Response
+	var respProvider string
+
+	_, _, err := p.rt.RouteWithFailover(model, p.failover, func(c *router.ProviderStatus) error {
+		prov, ok := p.providers[c.Name]
+		if !ok {
+			return fmt.Errorf("provider %q is not configured", c.Name)
+		}
+
+		httpReq, err := prov.ConvertRequest(ctx, &canonicalForProvider)
+		if err != nil {
+			return fmt.Errorf("failed to convert request for %s: %w", c.Name, err)
+		}
+
+		resp, err := p.doWithRetry(ctx, httpReq)
+		if err != nil {
+			return fmt.Errorf("upstream request to %s failed: %w", c.Name, err)
+		}
+
+		// 5xx/429 responses are failover-worthy provider failures when
+		// auto-failover is on; anything else (2xx, 4xx) is a final result.
+		if p.failover.Enabled && !p.failover.ReturnOnError &&
+			(resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests) {
+			resp.Body.Close()
+			return &providerFailure{provider: c.Name, status: resp.StatusCode}
+		}
+
+		lastResp = resp
+		respProvider = c.Name
+		return nil
+	})
+
+	if lastResp != nil {
+		return lastResp, respProvider, nil
+	}
+
+	if err != nil {
+		var pf *providerFailure
+		if errors.As(err, &pf) {
+			// The winning failure detail is kept, but the terminal
+			// outcome for the client is failover exhaustion.
+			return nil, "", fmt.Errorf("provider %s returned status %d: %w", pf.provider, pf.status, router.ErrAllProvidersFailed)
+		}
+		return nil, "", err
+	}
+
+	return nil, "", fmt.Errorf("no provider served the request")
+}
+
+// providerFailure marks a provider HTTP-level failure inside the
+// failover callback so the final error can be reported accurately.
+type providerFailure struct {
+	provider string
+	status   int
+}
+
+func (e *providerFailure) Error() string {
+	return fmt.Sprintf("provider %s returned status %d", e.provider, e.status)
+}
+
+// bareModel strips an explicit "provider/" prefix from a model string.
+func bareModel(model string) string {
+	if i := strings.Index(model, "/"); i >= 0 {
+		return model[i+1:]
+	}
+	return model
 }
 
 func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response) {
@@ -243,15 +382,6 @@ func (p *Proxy) writeError(w http.ResponseWriter, status int, errType, message s
 			"type":    errType,
 		},
 	})
-}
-
-// parseModel extracts provider name and model name from "provider/model" format.
-func parseModel(model string) (providerName, modelName string) {
-	parts := strings.SplitN(model, "/", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return "openai", model // Default to OpenAI
 }
 
 func extractMessages(body map[string]interface{}) []provider.Message {

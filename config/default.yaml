@@ -11,6 +11,21 @@ providers:
     base_url: "https://api.anthropic.com/v1"
     api_key: ""
 
+# Routing engine (D-08~D-12): strategies, routes, failover
+routing:
+  default_strategy: roundrobin
+  routes:
+    - model: "gpt-4"
+      providers: ["openai"]
+      strategy: roundrobin
+    - model: "claude-3-opus"
+      providers: ["anthropic"]
+      strategy: roundrobin
+  failover:
+    enabled: true
+    max_providers: 3
+    return_on_error: false
+
 logging:
   level: info
   format: json

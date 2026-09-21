@@ -23,9 +23,9 @@ type flushRecorder struct {
 	flushes int
 }
 
-func (r *flushRecorder) Header() http.Header         { return r.hdr }
-func (r *flushRecorder) WriteHeader(code int)        { r.code = code }
-func (r *flushRecorder) Flush()                      { r.mu.Lock(); r.flushes++; r.mu.Unlock() }
+func (r *flushRecorder) Header() http.Header  { return r.hdr }
+func (r *flushRecorder) WriteHeader(code int) { r.code = code }
+func (r *flushRecorder) Flush()               { r.mu.Lock(); r.flushes++; r.mu.Unlock() }
 func (r *flushRecorder) Write(b []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

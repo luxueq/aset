@@ -15,10 +15,34 @@ type Config struct {
 	Server    ServerConfig     `mapstructure:"server"`
 	Logging   LoggingConfig    `mapstructure:"logging"`
 	Providers *ProviderConfigs `mapstructure:"providers"`
+	Routing   *RoutingConfig   `mapstructure:"routing"`
 	Database  *DatabaseConfig  `mapstructure:"database"`
 	Redis     *RedisConfig     `mapstructure:"redis"`
 	Cache     *CacheConfig     `mapstructure:"cache"`
 	RateLimit *RateLimitConfig `mapstructure:"rate_limit"`
+}
+
+// RoutingConfig holds the router engine settings. Optional.
+type RoutingConfig struct {
+	// DefaultStrategy is one of roundrobin|latency|cost|weighted.
+	DefaultStrategy string      `mapstructure:"default_strategy"`
+	DefaultProvider string      `mapstructure:"default_provider"`
+	Routes          []RouteRule `mapstructure:"routes"`
+	Failover        *Failover   `mapstructure:"failover"`
+}
+
+// RouteRule maps a model to a provider pool and routing strategy.
+type RouteRule struct {
+	Model     string   `mapstructure:"model"`
+	Providers []string `mapstructure:"providers"`
+	Strategy  string   `mapstructure:"strategy"`
+}
+
+// Failover controls automatic cross-provider failover (D-10).
+type Failover struct {
+	Enabled       bool `mapstructure:"enabled"`
+	MaxProviders  int  `mapstructure:"max_providers"`
+	ReturnOnError bool `mapstructure:"return_on_error"`
 }
 
 // ServerConfig holds HTTP server settings. Always required.
@@ -50,16 +74,37 @@ type ProviderConfigs struct {
 	Zhipu     *ProviderConfig `mapstructure:"zhipu"`     // 智谱 GLM
 }
 
+// NamedProviderConfig pairs a provider name with its configuration.
+type NamedProviderConfig struct {
+	Name   string
+	Config *ProviderConfig
+}
+
+// All returns every configured provider (non-nil entries) with its name.
+// The order is fixed so router status seeding is deterministic.
+func (pc *ProviderConfigs) All() []NamedProviderConfig {
+	return []NamedProviderConfig{
+		{Name: "openai", Config: pc.OpenAI},
+		{Name: "anthropic", Config: pc.Anthropic},
+		{Name: "google", Config: pc.Google},
+		{Name: "deepseek", Config: pc.DeepSeek},
+		{Name: "dashscope", Config: pc.Dashscope},
+		{Name: "qianfan", Config: pc.Qianfan},
+		{Name: "spark", Config: pc.Spark},
+		{Name: "zhipu", Config: pc.Zhipu},
+	}
+}
+
 // ProviderConfig holds a single provider's settings.
 type ProviderConfig struct {
 	BaseURL    string            `mapstructure:"base_url"`
 	APIKey     string            `mapstructure:"api_key"`
-	APIKeyEnv  string            `mapstructure:"api_key_env"`  // 从环境变量读取 key
-	Headers    map[string]string `mapstructure:"headers"`      // 自定义请求头
+	APIKeyEnv  string            `mapstructure:"api_key_env"` // 从环境变量读取 key
+	Headers    map[string]string `mapstructure:"headers"`     // 自定义请求头
 	MaxRetries int               `mapstructure:"max_retries"`
 	Timeout    time.Duration     `mapstructure:"timeout"`
-	Weight     int               `mapstructure:"weight"`       // 路由权重（默认 1）
-	CostPer1K  float64           `mapstructure:"cost_per_1k"`  // 每 1K token 成本（美元）
+	Weight     int               `mapstructure:"weight"`      // 路由权重（默认 1）
+	CostPer1K  float64           `mapstructure:"cost_per_1k"` // 每 1K token 成本（美元）
 }
 
 // DatabaseConfig holds database connection settings. Optional.
@@ -187,6 +232,11 @@ func applyOptionalDefaults(cfg *Config) {
 		}
 		if cfg.Cache.SemanticThreshold == 0 {
 			cfg.Cache.SemanticThreshold = 0.92
+		}
+	}
+	if cfg.Routing != nil {
+		if cfg.Routing.DefaultStrategy == "" {
+			cfg.Routing.DefaultStrategy = "roundrobin"
 		}
 	}
 }
