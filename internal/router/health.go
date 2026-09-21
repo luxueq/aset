@@ -11,9 +11,9 @@ import (
 // endpoints on a fixed interval. A provider is marked unhealthy after 3
 // consecutive check failures (D-12) and healthy again after one success.
 type HealthMonitor struct {
-	router  *Router
-	client  *http.Client
-	urls    map[string]string // provider name -> check URL
+	router   *Router
+	client   *http.Client
+	urls     map[string]string // provider name -> check URL
 	interval time.Duration
 
 	mu     sync.Mutex

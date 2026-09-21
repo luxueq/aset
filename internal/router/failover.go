@@ -25,8 +25,8 @@ type FailoverConfig struct {
 // auto failover, max 3 providers).
 func DefaultFailoverConfig() FailoverConfig {
 	return FailoverConfig{
-		Enabled:      true,
-		MaxProviders: 3,
+		Enabled:       true,
+		MaxProviders:  3,
 		ReturnOnError: false,
 	}
 }

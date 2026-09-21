@@ -121,7 +121,7 @@ func (r *Router) SetProviders(providers []*ProviderStatus) {
 	for _, p := range providers {
 		r.byName[p.Name] = p
 	}
-}// Select picks a provider using the specified strategy (or default).
+} // Select picks a provider using the specified strategy (or default).
 func (r *Router) Select(strategyName string, req *provider.CanonicalRequest) (*ProviderStatus, error) {
 	r.mu.RLock()
 	providers := r.providers
