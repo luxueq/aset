@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/luxueq/aigateway/internal/auth"
 	"github.com/luxueq/aigateway/internal/common/config"
 	"github.com/luxueq/aigateway/internal/common/logger"
 	"github.com/luxueq/aigateway/internal/gateway"
@@ -41,18 +42,38 @@ func main() {
 		zap.String("version", "0.1.0"),
 	)
 
+	// Initialize API Key service with tenant-level encryption
+	encryptionSecret := os.Getenv("AIGATEWAY_KEY_ENCRYPTION_SECRET")
+	if encryptionSecret == "" {
+		encryptionSecret = "default-dev-secret-change-in-production"
+		log.Warn("using default encryption secret, set AIGATEWAY_KEY_ENCRYPTION_SECRET in production")
+	}
+
+	keyService, err := auth.NewKeyService(encryptionSecret)
+	if err != nil {
+		log.Fatal("failed to create key service", zap.Error(err))
+	}
+
 	// Create gateway proxy
 	proxy := gateway.NewProxy(cfg, log)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
 
-	// Health check endpoints
+	// Health check endpoints (no auth required)
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /ready", readyHandler(cfg))
 
-	// API proxy endpoints
-	mux.Handle("/v1/", proxy)
+	// API Key management endpoints
+	// NOTE: In production, protect these with admin authentication
+	keyHandler := auth.NewHandler(keyService)
+	keyHandler.RegisterRoutes(mux)
+
+	// API proxy endpoints (protected by API key auth)
+	authMiddleware := auth.AuthMiddleware(keyService)
+	mux.Handle("/v1/chat/completions", authMiddleware(proxy))
+	mux.Handle("/v1/embeddings", authMiddleware(proxy))
+	mux.Handle("/v1/images", authMiddleware(proxy))
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

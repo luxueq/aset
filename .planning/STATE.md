@@ -1,3 +1,17 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: unknown
+last_updated: "2026-09-21T06:03:04.749Z"
+progress:
+  total_phases: 8
+  completed_phases: 0
+  total_plans: 6
+  completed_plans: 0
+  percent: 0
+---
+
 # STATE: AIGateway
 
 ## Project Reference
@@ -5,7 +19,7 @@
 See: .planning/PROJECT.md (updated 2026-06-30)
 
 **Core value:** 让任何 AI Agent 都能通过统一网关安全、高效、可观测地运行和协作
-**Current focus:** Phase 1 — Core Gateway (Context gathered, ready for planning)
+**Current focus:** Phase 01 — core-gateway
 
 ## Current Phase
 
