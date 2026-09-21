@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,22 +30,34 @@ type Strategy interface {
 	Select(providers []*ProviderStatus, req *provider.CanonicalRequest) (*ProviderStatus, error)
 }
 
-// Router selects providers based on configured strategies.
-type Router struct {
-	strategies      map[string]Strategy
-	defaultStrategy string
-	mu              sync.RWMutex
-	counter         int
-	providers       []*ProviderStatus
+// RouteRule maps a model to an ordered provider pool and a routing strategy.
+// A rule matches a request whose model string equals the rule's Model,
+// either in full ("openai/gpt-4") or as the bare model segment ("gpt-4").
+type RouteRule struct {
+	Model     string
+	Providers []string
+	Strategy  string
 }
 
 // Config holds router configuration.
 type Config struct {
-	DefaultStrategy string `yaml:"default_strategy"`
+	DefaultStrategy string
+	Routes          []RouteRule
 }
 
 // ErrNoHealthyProvider is returned when no healthy provider is available.
 var ErrNoHealthyProvider = errors.New("no healthy provider available")
+
+// Router selects providers based on configured strategies.
+type Router struct {
+	strategies      map[string]Strategy
+	defaultStrategy string
+	routes          []RouteRule
+	mu              sync.RWMutex
+	counter         int
+	providers       []*ProviderStatus
+	byName          map[string]*ProviderStatus
+}
 
 // New creates a new Router with all strategies registered.
 func New(cfg Config) *Router {
@@ -56,6 +69,8 @@ func New(cfg Config) *Router {
 	r := &Router{
 		strategies:      make(map[string]Strategy),
 		defaultStrategy: defaultStrategy,
+		routes:          cfg.Routes,
+		byName:          make(map[string]*ProviderStatus),
 	}
 
 	r.strategies["roundrobin"] = &RoundRobinStrategy{router: r}
@@ -70,18 +85,22 @@ func New(cfg Config) *Router {
 func (r *Router) SetProviders(providers []*ProviderStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.providers = providers
+	r.byName = make(map[string]*ProviderStatus, len(providers))
+	for _, p := range providers {
+		r.byName[p.Name] = p
+	}
 }
 
 // Select picks a provider using the specified strategy (or default).
 func (r *Router) Select(strategyName string, req *provider.CanonicalRequest) (*ProviderStatus, error) {
 	r.mu.RLock()
 	providers := r.providers
-	r.mu.RUnlock()
-
 	if strategyName == "" {
 		strategyName = r.defaultStrategy
 	}
+	r.mu.RUnlock()
 
 	strategy, ok := r.strategies[strategyName]
 	if !ok {
@@ -97,23 +116,134 @@ func (r *Router) Select(strategyName string, req *provider.CanonicalRequest) (*P
 	return strategy.Select(healthy, req)
 }
 
+// Candidates returns an ordered list of providers eligible to serve a
+// request for the given model. The first entry is the strategy's primary
+// choice; the remaining entries are the failover order (stable pool order).
+//
+// Resolution order:
+//  1. A matching route rule (full model match, then bare model match)
+//     defines the provider pool and strategy.
+//  2. An explicit "provider/model" request pins that single provider.
+//  3. A bare model routes across all registered providers with the
+//     default strategy.
+func (r *Router) Candidates(model string) []*ProviderStatus {
+	r.mu.RLock()
+	pool := r.resolvePool(model)
+	strategyName := r.strategyFor(model)
+	r.mu.RUnlock()
+
+	healthy := filterHealthy(pool)
+	if len(healthy) == 0 {
+		return nil
+	}
+
+	strategy, ok := r.strategies[strategyName]
+	if !ok {
+		strategy = r.strategies[r.defaultStrategy]
+	}
+
+	first, err := strategy.Select(healthy, &provider.CanonicalRequest{Model: model})
+	if err != nil || first == nil {
+		return healthy
+	}
+
+	candidates := make([]*ProviderStatus, 0, len(healthy))
+	candidates = append(candidates, first)
+	for _, p := range healthy {
+		if p != first {
+			candidates = append(candidates, p)
+		}
+	}
+	return candidates
+}
+
+// resolvePool returns the ordered provider pool for a model.
+// Caller must hold r.mu.
+func (r *Router) resolvePool(model string) []*ProviderStatus {
+	if rule := r.matchRoute(model); rule != nil {
+		pool := make([]*ProviderStatus, 0, len(rule.Providers))
+		for _, name := range rule.Providers {
+			if p, ok := r.byName[name]; ok {
+				pool = append(pool, p)
+			}
+		}
+		return pool
+	}
+
+	// Explicit "provider/model" pins the named provider.
+	if provName, _, ok := splitProviderModel(model); ok {
+		if p, exists := r.byName[provName]; exists {
+			return []*ProviderStatus{p}
+		}
+		return nil
+	}
+
+	// Bare model: all providers in registration order.
+	return append([]*ProviderStatus(nil), r.providers...)
+}
+
+// matchRoute finds the first route rule matching the model (full string
+// first, then the bare model segment). Caller must hold r.mu.
+func (r *Router) matchRoute(model string) *RouteRule {
+	bare := ""
+	if _, rest, ok := splitProviderModel(model); ok {
+		bare = rest
+	}
+	for i := range r.routes {
+		if r.routes[i].Model == model {
+			return &r.routes[i]
+		}
+		if bare != "" && r.routes[i].Model == bare {
+			return &r.routes[i]
+		}
+	}
+	return nil
+}
+
+// strategyFor returns the strategy name for a model. Caller must hold r.mu.
+func (r *Router) strategyFor(model string) string {
+	if rule := r.matchRoute(model); rule != nil && rule.Strategy != "" {
+		return rule.Strategy
+	}
+	return r.defaultStrategy
+}
+
+// splitProviderModel splits "provider/model" into its parts.
+func splitProviderModel(model string) (prov, bare string, ok bool) {
+	if i := strings.Index(model, "/"); i >= 0 {
+		return model[:i], model[i+1:], true
+	}
+	return "", "", false
+}
+
+// Status returns a copy of the provider's current runtime status.
+func (r *Router) Status(name string) (ProviderStatus, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	p, ok := r.byName[name]
+	if !ok {
+		return ProviderStatus{}, false
+	}
+	return *p, true
+}
+
 // RecordSuccess records a successful request to a provider.
 func (r *Router) RecordSuccess(name string, latency time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, p := range r.providers {
-		if p.Name == name {
-			p.TotalCount++
-			p.FailStreak = 0
-			// Exponential moving average for latency
-			if p.AvgLatency == 0 {
-				p.AvgLatency = latency
-			} else {
-				p.AvgLatency = time.Duration(float64(p.AvgLatency)*0.8 + float64(latency)*0.2)
-			}
-			break
-		}
+	p, ok := r.byName[name]
+	if !ok {
+		return
+	}
+	p.TotalCount++
+	p.FailStreak = 0
+	// Exponential moving average for latency
+	if p.AvgLatency == 0 {
+		p.AvgLatency = latency
+	} else {
+		p.AvgLatency = time.Duration(float64(p.AvgLatency)*0.8 + float64(latency)*0.2)
 	}
 }
 
@@ -122,20 +252,19 @@ func (r *Router) RecordFailure(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, p := range r.providers {
-		if p.Name == name {
-			p.TotalCount++
-			p.ErrorCount++
-			p.FailStreak++
-			if p.TotalCount > 0 {
-				p.ErrorRate = float64(p.ErrorCount) / float64(p.TotalCount)
-			}
-			// Mark unhealthy after 3 consecutive failures or >50% error rate
-			if p.FailStreak >= 3 || p.ErrorRate > 0.5 {
-				p.Healthy = false
-			}
-			break
-		}
+	p, ok := r.byName[name]
+	if !ok {
+		return
+	}
+	p.TotalCount++
+	p.ErrorCount++
+	p.FailStreak++
+	if p.TotalCount > 0 {
+		p.ErrorRate = float64(p.ErrorCount) / float64(p.TotalCount)
+	}
+	// Unhealthy when the passive error rate exceeds 50%.
+	if p.ErrorRate > 0.5 {
+		p.Healthy = false
 	}
 }
 
@@ -144,14 +273,13 @@ func (r *Router) MarkHealthy(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, p := range r.providers {
-		if p.Name == name {
-			p.Healthy = true
-			p.FailStreak = 0
-			p.LastCheck = time.Now()
-			break
-		}
+	p, ok := r.byName[name]
+	if !ok {
+		return
 	}
+	p.Healthy = true
+	p.FailStreak = 0
+	p.LastCheck = time.Now()
 }
 
 // MarkUnhealthy marks a provider as unhealthy.
@@ -159,13 +287,12 @@ func (r *Router) MarkUnhealthy(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, p := range r.providers {
-		if p.Name == name {
-			p.Healthy = false
-			p.LastCheck = time.Now()
-			break
-		}
+	p, ok := r.byName[name]
+	if !ok {
+		return
 	}
+	p.Healthy = false
+	p.LastCheck = time.Now()
 }
 
 func filterHealthy(providers []*ProviderStatus) []*ProviderStatus {
