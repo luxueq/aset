@@ -137,6 +137,9 @@ func (h *Handler) getKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteKey handles DELETE /v1/api-keys/:id
+// The key is revoked (soft delete), not removed: revoked keys fail
+// validation with 401 on the next request. Full removal is an admin/DB
+// operation.
 func (h *Handler) deleteKey(w http.ResponseWriter, r *http.Request) {
 	// Extract key ID from URL path: /v1/api-keys/{id}
 	id := strings.TrimPrefix(r.URL.Path, "/v1/api-keys/")
@@ -152,11 +155,11 @@ func (h *Handler) deleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.keyService.Delete(tenantID, id); err != nil {
+	if err := h.keyService.Revoke(tenantID, id); err != nil {
 		if err == ErrKeyNotFound {
 			writeError(w, http.StatusNotFound, "api_key_not_found")
 		} else {
-			writeError(w, http.StatusInternalServerError, "failed_to_delete_api_key")
+			writeError(w, http.StatusInternalServerError, "failed_to_revoke_api_key")
 		}
 		return
 	}
@@ -164,7 +167,7 @@ func (h *Handler) deleteKey(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"status": "deleted",
+		"status": "revoked",
 		"id":     id,
 	})
 }
