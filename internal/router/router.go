@@ -42,7 +42,13 @@ type RouteRule struct {
 // Config holds router configuration.
 type Config struct {
 	DefaultStrategy string
+	DefaultProvider string
 	Routes          []RouteRule
+	// Window is the passive error-rate sliding window (default 5m).
+	Window time.Duration
+	// MinSamples is the minimum window events before the error rate is
+	// trusted to mark a provider unhealthy (default 3).
+	MinSamples int
 }
 
 // ErrNoHealthyProvider is returned when no healthy provider is available.
@@ -52,11 +58,23 @@ var ErrNoHealthyProvider = errors.New("no healthy provider available")
 type Router struct {
 	strategies      map[string]Strategy
 	defaultStrategy string
+	defaultProvider string
 	routes          []RouteRule
+	window          time.Duration
+	minSamples      int
 	mu              sync.RWMutex
 	counter         int
 	providers       []*ProviderStatus
 	byName          map[string]*ProviderStatus
+	// events tracks the per-provider request outcome timestamps used for
+	// the passive sliding-window error rate (failures and successes).
+	events map[string][]windowEvent
+}
+
+// windowEvent is a single recorded request outcome within the window.
+type windowEvent struct {
+	at      time.Time
+	failure bool
 }
 
 // New creates a new Router with all strategies registered.
@@ -66,11 +84,23 @@ func New(cfg Config) *Router {
 		defaultStrategy = "roundrobin"
 	}
 
+	window := cfg.Window
+	if window <= 0 {
+		window = 5 * time.Minute
+	}
+	minSamples := cfg.MinSamples
+	if minSamples <= 0 {
+		minSamples = 3
+	}
+
 	r := &Router{
 		strategies:      make(map[string]Strategy),
 		defaultStrategy: defaultStrategy,
+		defaultProvider: cfg.DefaultProvider,
 		routes:          cfg.Routes,
-		byName:          make(map[string]*ProviderStatus),
+		window:          window,
+		minSamples:      minSamples,
+		events:          make(map[string][]windowEvent),
 	}
 
 	r.strategies["roundrobin"] = &RoundRobinStrategy{router: r}
@@ -91,9 +121,7 @@ func (r *Router) SetProviders(providers []*ProviderStatus) {
 	for _, p := range providers {
 		r.byName[p.Name] = p
 	}
-}
-
-// Select picks a provider using the specified strategy (or default).
+}// Select picks a provider using the specified strategy (or default).
 func (r *Router) Select(strategyName string, req *provider.CanonicalRequest) (*ProviderStatus, error) {
 	r.mu.RLock()
 	providers := r.providers
@@ -178,7 +206,12 @@ func (r *Router) resolvePool(model string) []*ProviderStatus {
 		return nil
 	}
 
-	// Bare model: all providers in registration order.
+	// Bare model: a configured default provider, else all providers.
+	if r.defaultProvider != "" {
+		if p, ok := r.byName[r.defaultProvider]; ok {
+			return []*ProviderStatus{p}
+		}
+	}
 	return append([]*ProviderStatus(nil), r.providers...)
 }
 
@@ -245,6 +278,8 @@ func (r *Router) RecordSuccess(name string, latency time.Duration) {
 	} else {
 		p.AvgLatency = time.Duration(float64(p.AvgLatency)*0.8 + float64(latency)*0.2)
 	}
+
+	r.recordEvent(name, false)
 }
 
 // RecordFailure records a failed request to a provider.
@@ -259,12 +294,82 @@ func (r *Router) RecordFailure(name string) {
 	p.TotalCount++
 	p.ErrorCount++
 	p.FailStreak++
-	if p.TotalCount > 0 {
-		p.ErrorRate = float64(p.ErrorCount) / float64(p.TotalCount)
+
+	r.recordEvent(name, true)
+}
+
+// recordEvent appends a request outcome to the provider's sliding window
+// and recomputes the passive health verdict. Caller must hold r.mu.
+func (r *Router) recordEvent(name string, failure bool) {
+	p := r.byName[name]
+	now := time.Now()
+
+	events := append(r.events[name], windowEvent{at: now, failure: failure})
+	events = trimEvents(events, now.Add(-r.window))
+
+	failures, total := countEvents(events)
+	// Keep the recent tail bounded even when time is frozen (tests).
+	const maxKeep = 100
+	if total > maxKeep {
+		events = events[total-maxKeep:]
+		failures, total = countEvents(events)
 	}
-	// Unhealthy when the passive error rate exceeds 50%.
-	if p.ErrorRate > 0.5 {
+
+	r.events[name] = events
+	if p != nil && total > 0 {
+		p.ErrorRate = float64(failures) / float64(total)
+	}
+
+	// Passive unhealthy verdict (D-12): error rate > 50% over enough
+	// samples. A single transient failure must NOT mark a provider
+	// unhealthy — MinSamples guards against early noise.
+	if p != nil && total >= r.minSamples && p.ErrorRate > 0.5 {
 		p.Healthy = false
+	}
+}
+
+// trimEvents drops events older than the cutoff. events is time-ordered.
+func trimEvents(events []windowEvent, cutoff time.Time) []windowEvent {
+	drop := 0
+	for drop < len(events) && events[drop].at.Before(cutoff) {
+		drop++
+	}
+	if drop > 0 {
+		return events[drop:]
+	}
+	return events
+}
+
+// countEvents returns (failures, total) for a window slice.
+func countEvents(events []windowEvent) (failures, total int) {
+	for _, e := range events {
+		total++
+		if e.failure {
+			failures++
+		}
+	}
+	return failures, total
+}
+
+// Refresh recomputes every provider's windowed error rate from the current
+// clock, expiring old events. Intended to be called periodically (e.g. by
+// the health monitor loop).
+func (r *Router) Refresh() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for name, events := range r.events {
+		events = trimEvents(events, time.Now().Add(-r.window))
+		r.events[name] = events
+		p := r.byName[name]
+		if p == nil {
+			continue
+		}
+		_, total := countEvents(events)
+		if total > 0 {
+			failures, _ := countEvents(events)
+			p.ErrorRate = float64(failures) / float64(total)
+		}
 	}
 }
 
