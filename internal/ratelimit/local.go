@@ -18,12 +18,24 @@ type RateBucket struct {
 	capacity   float64   // max units (burst size)
 }
 
-// NewRateBucket creates a new rate bucket.
+// NewRateBucket creates a new rate bucket, initially full.
 // refillRate: units added per second
 // capacity: maximum units (burst size)
 func NewRateBucket(refillRate float64, capacity float64) *RateBucket {
 	return &RateBucket{
 		available:  capacity,
+		lastTime:   time.Now(),
+		refillRate: refillRate,
+		capacity:   capacity,
+	}
+}
+
+// NewRateBucketEmpty creates a rate bucket that starts with zero available
+// units. Lease managers use this so quota is only servable after a batch is
+// actually acquired from the central store.
+func NewRateBucketEmpty(refillRate float64, capacity float64) *RateBucket {
+	return &RateBucket{
+		available:  0,
 		lastTime:   time.Now(),
 		refillRate: refillRate,
 		capacity:   capacity,
@@ -52,6 +64,18 @@ func (rb *RateBucket) Allow(cost float64) bool {
 	}
 
 	return false
+}
+
+// RefillUnits credits units to the bucket without consuming them, capped
+// at capacity. Used by lease managers to credit newly leased batches.
+func (rb *RateBucket) RefillUnits(units float64) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	rb.available += units
+	if rb.available > rb.capacity {
+		rb.available = rb.capacity
+	}
 }
 
 // Available returns the current available units.
@@ -236,10 +260,10 @@ func (s *Semaphore) Current() int {
 // - Concurrency: Semaphore (counter-based)
 type LocalRateLimiter struct {
 	mu             sync.RWMutex
-	rateBuckets    map[string]*RateBucket      // for TPM
-	slidingWindows map[string]*SlidingWindow   // for RPM
-	semaphores     map[string]*Semaphore       // for Concurrency
-	quotaWindows   map[string]*QuotaWindow     // for daily/monthly quota
+	rateBuckets    map[string]*RateBucket    // for TPM
+	slidingWindows map[string]*SlidingWindow // for RPM
+	semaphores     map[string]*Semaphore     // for Concurrency
+	quotaWindows   map[string]*QuotaWindow   // for daily/monthly quota
 	configs        *LevelConfigs
 }
 

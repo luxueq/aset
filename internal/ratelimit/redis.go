@@ -461,29 +461,56 @@ func (r *RedisRateLimiter) GetAvailable(ctx context.Context, keys DimensionKeys,
 			continue
 		}
 
-		// For RPM/TPM, read from rate bucket
+		// For RPM/TPM, read current usage from the stored state.
+		// RPM uses a sliding-window ZSET; TPM uses a token-bucket hash.
 		redisKey := fmt.Sprintf("rl:%s:{%s}:%s", d.dim, d.key, metric)
-		available, err := r.client.HGet(ctx, redisKey, "available").Float64()
-		if err == redis.Nil {
-			// Key doesn't exist, full capacity available
-			var limit int64
-			switch metric {
-			case MetricRPM:
-				limit = int64(levelCfg.RPM)
-			case MetricTPMInput:
-				limit = levelCfg.TPMInput
-			case MetricTPMOutput:
-				limit = levelCfg.TPMOutput
-			default:
-				continue
-			}
-			available = float64(limit)
-		} else if err != nil {
+
+		var limit int64
+		switch metric {
+		case MetricRPM:
+			limit = int64(levelCfg.RPM)
+		case MetricTPMInput:
+			limit = levelCfg.TPMInput
+		case MetricTPMOutput:
+			limit = levelCfg.TPMOutput
+		default:
+			continue
+		}
+		if limit == 0 {
 			continue
 		}
 
-		if minAvailable == -1 || int64(available) < minAvailable {
-			minAvailable = int64(available)
+		var used int64
+		if metric == MetricRPM {
+			count, err := r.client.ZCard(ctx, redisKey).Result()
+			if err != nil {
+				continue // key missing → count 0
+			}
+			used = count
+		} else {
+			availableF, err := r.client.HGet(ctx, redisKey, "available").Float64()
+			if err == redis.Nil {
+				// Key doesn't exist, full capacity available
+				availableF = float64(limit)
+			} else if err != nil {
+				continue
+			}
+			available := int64(availableF)
+			if available < 0 {
+				available = 0
+			}
+			if minAvailable == -1 || available < minAvailable {
+				minAvailable = available
+			}
+			continue
+		}
+
+		available := limit - used
+		if available < 0 {
+			available = 0
+		}
+		if minAvailable == -1 || available < minAvailable {
+			minAvailable = available
 		}
 	}
 

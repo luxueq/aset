@@ -26,8 +26,28 @@ func NewRateLimiter(cfg *Config) (RateLimiter, error) {
 		return NewRedisRateLimiter(client, &cfg.Levels)
 
 	case ModeHybrid:
-		// TODO: Implement in Task 4.3
-		return nil, fmt.Errorf("hybrid mode not yet implemented")
+		if cfg.Hybrid == nil {
+			return nil, fmt.Errorf("hybrid mode requires hybrid config")
+		}
+		// The hybrid limiter needs its own Redis connection (its circuit
+		// breaker owns the failure detection for that connection).
+		hredis := cfg.Hybrid.Redis
+		if hredis == nil {
+			hredis = cfg.Redis
+		}
+		if hredis == nil {
+			return nil, fmt.Errorf("hybrid mode requires a redis config")
+		}
+		client, err := NewRedisClient(hredis)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create redis client: %w", err)
+		}
+		redisLimiter, err := NewRedisRateLimiter(client, &cfg.Levels)
+		if err != nil {
+			client.Close()
+			return nil, fmt.Errorf("failed to create redis limiter: %w", err)
+		}
+		return NewHybridRateLimiter(redisLimiter, cfg.Hybrid, &cfg.Levels, nil)
 
 	case ModeSharded:
 		// TODO: Implement in Task 4.4

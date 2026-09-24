@@ -13,6 +13,11 @@
 --
 -- Returns:
 --   {allowed (0/1), remaining (int), retry_after_ms (int)}
+--
+-- Cost semantics: a check with cost N consumes N window slots. This matters
+-- for lease refills in hybrid mode (one batch call consumes a batch of
+-- quota). Cost-weighted entries are stored as N ZSET members; a zero-cost
+-- probe consumes nothing and is a pure read.
 
 local key = KEYS[1]
 local limit = tonumber(ARGV[1])
@@ -35,10 +40,14 @@ local remaining = 0
 local retry_after_ms = 0
 
 if count + cost <= limit then
-    -- Allowed: add new entry
-    -- Use timestamp + random to ensure uniqueness
-    local member = tostring(now) .. ':' .. tostring(math.random(1000000))
-    redis.call('ZADD', key, now, member)
+    -- Allowed: add cost entries (weighted sliding window: a batch check of
+    -- cost N consumes N window slots, not one)
+    for i = 1, cost do
+        -- timestamp + random + index ensures uniqueness across concurrent
+        -- batch checks within the same millisecond
+        local member = tostring(now) .. ':' .. tostring(math.random(1000000)) .. ':' .. tostring(i)
+        redis.call('ZADD', key, now, member)
+    end
     redis.call('PEXPIRE', key, window_size + 1000)  -- Add 1s buffer
 
     allowed = 1
@@ -58,7 +67,12 @@ else
         retry_after_ms = window_size
     end
 
-    remaining = 0
+    -- Remaining is what could still be admitted (limit - current count),
+    -- NOT zero: hybrid lease refills use it to request a smaller lease.
+    remaining = limit - count
+    if remaining < 0 then
+        remaining = 0
+    end
 end
 
 return {allowed, remaining, retry_after_ms}
