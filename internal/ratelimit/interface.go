@@ -9,10 +9,10 @@ import (
 type Dimension string
 
 const (
-	DimensionGlobal  Dimension = "global"
-	DimensionTenant  Dimension = "tenant"
-	DimensionModel   Dimension = "model"
-	DimensionAPIKey  Dimension = "api_key"
+	DimensionGlobal Dimension = "global"
+	DimensionTenant Dimension = "tenant"
+	DimensionModel  Dimension = "model"
+	DimensionAPIKey Dimension = "api_key"
 )
 
 // Metric represents different rate limiting metrics.
@@ -21,30 +21,30 @@ const (
 type Metric string
 
 const (
-	MetricRPM         Metric = "rpm"          // 请求频率
-	MetricTPMInput    Metric = "tpm:input"    // 输入 token
-	MetricTPMOutput   Metric = "tpm:output"   // 输出 token
-	MetricConcurrency Metric = "concurrency"  // 并发数
-	MetricDailyQuota  Metric = "quota:daily"  // 日配额（token 总量）
+	MetricRPM          Metric = "rpm"           // 请求频率
+	MetricTPMInput     Metric = "tpm:input"     // 输入 token
+	MetricTPMOutput    Metric = "tpm:output"    // 输出 token
+	MetricConcurrency  Metric = "concurrency"   // 并发数
+	MetricDailyQuota   Metric = "quota:daily"   // 日配额（token 总量）
 	MetricMonthlyQuota Metric = "quota:monthly" // 月配额（token 总量）
 )
 
 // DimensionKeys holds the keys for all rate limiting dimensions.
 type DimensionKeys struct {
-	Global string `json:"global"` // typically "global"
-	Tenant string `json:"tenant"` // e.g., "tenant:123"
-	Model  string `json:"model"`  // e.g., "model:openai:gpt-4"
+	Global string `json:"global"`  // typically "global"
+	Tenant string `json:"tenant"`  // e.g., "tenant:123"
+	Model  string `json:"model"`   // e.g., "model:openai:gpt-4"
 	APIKey string `json:"api_key"` // e.g., "key:abc123"
 }
 
 // LimitResult represents the result of a rate limit check.
 type LimitResult struct {
-	Allowed    bool        `json:"allowed"`
-	Dimension  Dimension   `json:"dimension,omitempty"`  // which dimension blocked (if not allowed)
-	Metric     Metric      `json:"metric,omitempty"`     // which metric exceeded
+	Allowed    bool          `json:"allowed"`
+	Dimension  Dimension     `json:"dimension,omitempty"` // which dimension blocked (if not allowed)
+	Metric     Metric        `json:"metric,omitempty"`    // which metric exceeded
 	RetryAfter time.Duration `json:"retry_after,omitempty"`
-	Limit      int64       `json:"limit"`                // limit value (for response header)
-	Remaining  int64       `json:"remaining"`            // remaining quota
+	Limit      int64         `json:"limit"`     // limit value (for response header)
+	Remaining  int64         `json:"remaining"` // remaining quota
 }
 
 // RateLimiter is the unified interface for all rate limiting modes.

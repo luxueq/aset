@@ -24,10 +24,10 @@ type Config struct {
 
 // LocalConfig holds configuration for local mode.
 type LocalConfig struct {
-	RPM         int     `yaml:"rpm"`
-	TPMInput    int64   `yaml:"tpm_input"`
-	TPMOutput   int64   `yaml:"tpm_output"`
-	Concurrency int     `yaml:"concurrency"`
+	RPM         int   `yaml:"rpm"`
+	TPMInput    int64 `yaml:"tpm_input"`
+	TPMOutput   int64 `yaml:"tpm_output"`
+	Concurrency int   `yaml:"concurrency"`
 }
 
 // RedisConfig holds configuration for Redis connection.
@@ -45,9 +45,9 @@ type RedisConfig struct {
 	Pool *PoolConfig `yaml:"pool"`
 
 	// Timeout configuration (separate for different operations)
-	DialTimeout  time.Duration `yaml:"dial_timeout"`   // TCP connection timeout, default: 5s
-	ReadTimeout  time.Duration `yaml:"read_timeout"`   // Read response timeout, default: 100ms
-	WriteTimeout time.Duration `yaml:"write_timeout"`  // Write data timeout, default: 100ms
+	DialTimeout  time.Duration `yaml:"dial_timeout"`  // TCP connection timeout, default: 5s
+	ReadTimeout  time.Duration `yaml:"read_timeout"`  // Read response timeout, default: 100ms
+	WriteTimeout time.Duration `yaml:"write_timeout"` // Write data timeout, default: 100ms
 
 	// Backward compatibility: if Timeout is set, it overrides ReadTimeout and WriteTimeout
 	Timeout time.Duration `yaml:"timeout"`
@@ -64,8 +64,8 @@ type ClusterConfig struct {
 
 // PoolConfig holds connection pool configuration.
 type PoolConfig struct {
-	Size      int `yaml:"size"`
-	MinIdle   int `yaml:"min_idle"`
+	Size       int `yaml:"size"`
+	MinIdle    int `yaml:"min_idle"`
 	MaxRetries int `yaml:"max_retries"`
 }
 
@@ -76,30 +76,30 @@ type HybridConfig struct {
 	LeaseBatchSize    int64         `yaml:"lease_batch_size"`
 	LocalSafetyFactor float64       `yaml:"local_safety_factor"`
 
-	Redis   *RedisConfig    `yaml:"redis"`
+	Redis    *RedisConfig    `yaml:"redis"`
 	Fallback *FallbackConfig `yaml:"fallback"`
 }
 
 // FallbackConfig holds fallback strategy when Redis is unavailable.
 type FallbackConfig struct {
-	BillingQuota    string `yaml:"billing_quota"`    // snapshot | reject
-	RPMProtection   string `yaml:"rpm_protection"`   // conservative_local | reject
-	Concurrency     string `yaml:"concurrency"`      // local_only
+	BillingQuota  string `yaml:"billing_quota"`  // snapshot | reject
+	RPMProtection string `yaml:"rpm_protection"` // conservative_local | reject
+	Concurrency   string `yaml:"concurrency"`    // local_only
 }
 
 // ShardedConfig holds configuration for sharded mode.
 type ShardedConfig struct {
-	Redis      *RedisConfig     `yaml:"redis"`
-	Sharding   *ShardingConfig  `yaml:"sharding"`
+	Redis       *RedisConfig       `yaml:"redis"`
+	Sharding    *ShardingConfig    `yaml:"sharding"`
 	Aggregation *AggregationConfig `yaml:"aggregation"`
 }
 
 // ShardingConfig holds key sharding configuration.
 type ShardingConfig struct {
-	Method         string            `yaml:"method"` // request_hash | round_robin | consistent_hash
-	HotTenants     map[string]TenantShardConfig `yaml:"hot_tenants"`
-	AutoDetection  *AutoDetectionConfig `yaml:"auto_detection"`
-	DefaultShardCount int            `yaml:"default_shard_count"`
+	Method            string                       `yaml:"method"` // request_hash | round_robin | consistent_hash
+	HotTenants        map[string]TenantShardConfig `yaml:"hot_tenants"`
+	AutoDetection     *AutoDetectionConfig         `yaml:"auto_detection"`
+	DefaultShardCount int                          `yaml:"default_shard_count"`
 }
 
 // TenantShardConfig holds shard configuration for a specific tenant.
@@ -118,16 +118,16 @@ type AutoDetectionConfig struct {
 
 // AggregationConfig holds cross-shard aggregation configuration.
 type AggregationConfig struct {
-	CheckStrategy      string `yaml:"check_strategy"`      // aggregate | first_fail
+	CheckStrategy     string `yaml:"check_strategy"`     // aggregate | first_fail
 	QuotaDistribution string `yaml:"quota_distribution"` // even | weighted
 }
 
 // LevelConfigs holds rate limit configuration for all levels.
 type LevelConfigs struct {
-	Global  *LevelConfig            `yaml:"global"`
-	Tenant  *LevelConfig            `yaml:"tenant"`
-	Model   map[string]*LevelConfig `yaml:"model"` // model-specific configs
-	APIKey  *LevelConfig            `yaml:"api_key"`
+	Global *LevelConfig            `yaml:"global"`
+	Tenant *LevelConfig            `yaml:"tenant"`
+	Model  map[string]*LevelConfig `yaml:"model"` // model-specific configs
+	APIKey *LevelConfig            `yaml:"api_key"`
 }
 
 // LevelConfig holds rate limit configuration for a specific level.

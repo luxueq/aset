@@ -61,12 +61,13 @@ type CircuitBreaker struct {
 }
 
 // NewCircuitBreaker creates a circuit breaker.
-// - errorThreshold: consecutive failures in the closed state that trip it open
-//   (default 5).
-// - halfOpenMaxProbes: max concurrent probes admitted in half-open before the
-//   breaker closes again (default 3).
-// - timeout: how long the breaker stays open before allowing a half-open probe
-//   (default 30s).
+//   - errorThreshold: consecutive failures in the closed state that trip it open
+//     (default 5).
+//   - halfOpenMaxProbes: max concurrent probes admitted in half-open before the
+//     breaker closes again (default 3).
+//   - timeout: how long the breaker stays open before allowing a half-open probe
+//     (default 30s).
+//
 // Zero/negative values fall back to the defaults.
 func NewCircuitBreaker(errorThreshold, halfOpenMaxProbes int, timeout time.Duration) *CircuitBreaker {
 	if errorThreshold <= 0 {
