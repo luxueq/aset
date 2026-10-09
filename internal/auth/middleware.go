@@ -76,6 +76,13 @@ func GetAPIKeyFromContext(ctx context.Context) *APIKey {
 	return apiKey
 }
 
+// WithAPIKey returns a context with the given API key attached. It mirrors
+// GetAPIKeyFromContext and is used by downstream handlers and tests to inject
+// an authenticated identity.
+func WithAPIKey(ctx context.Context, key *APIKey) context.Context {
+	return context.WithValue(ctx, apiKeyContextKey, key)
+}
+
 // getRequiredPermission returns the required permission for a given path.
 func getRequiredPermission(path string) string {
 	// Map paths to required permissions

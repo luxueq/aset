@@ -163,8 +163,8 @@ logging:
 	if cfg.Cache != nil {
 		t.Error("Cache should be nil")
 	}
-	if cfg.RateLimit != nil {
-		t.Error("RateLimit should be nil")
+	if cfg.RateLimiter != nil {
+		t.Error("RateLimiter should be nil")
 	}
 }
 
@@ -194,9 +194,11 @@ cache:
   ttl: 10m
   max_items: 5000
 rate_limit:
-  enabled: true
-  tokens_per_sec: 1000
-  burst_size: 100
+  mode: local
+  levels:
+    global:
+      rpm: 1000
+      tpm_input: 50000
 `), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -232,10 +234,13 @@ rate_limit:
 	if cfg.Cache.MaxItems != 5000 {
 		t.Errorf("Cache.MaxItems = %d, want 5000", cfg.Cache.MaxItems)
 	}
-	if cfg.RateLimit == nil {
-		t.Fatal("RateLimit should not be nil")
+	if cfg.RateLimiter == nil {
+		t.Fatal("RateLimiter should not be nil")
 	}
-	if cfg.RateLimit.TokensPerSec != 1000 {
-		t.Errorf("RateLimit.TokensPerSec = %d, want 1000", cfg.RateLimit.TokensPerSec)
+	if cfg.RateLimiter.Mode != "local" {
+		t.Errorf("RateLimiter.Mode = %q, want local", cfg.RateLimiter.Mode)
+	}
+	if cfg.RateLimiter.Levels.Global == nil || cfg.RateLimiter.Levels.Global.RPM != 1000 {
+		t.Errorf("RateLimiter.Levels.Global.RPM = %d, want 1000", cfg.RateLimiter.Levels.Global.RPM)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/luxueq/aigateway/internal/common/config"
 	"github.com/luxueq/aigateway/internal/common/logger"
 	"github.com/luxueq/aigateway/internal/gateway"
+	"github.com/luxueq/aigateway/internal/ratelimit"
 	"go.uber.org/zap"
 )
 
@@ -94,11 +95,27 @@ func main() {
 	keyHandler := auth.NewHandler(keyService)
 	keyHandler.RegisterRoutes(mux)
 
-	// API proxy endpoints (protected by API key auth)
+	// Create rate limiter (optional: nil when not configured)
+	var limiter ratelimit.RateLimiter
+	if cfg.RateLimiter != nil {
+		limiter, err = ratelimit.NewRateLimiter(cfg.RateLimiter)
+		if err != nil {
+			log.Fatal("failed to create rate limiter", zap.Error(err))
+		}
+		// Redis/Hybrid/Sharded modes own backend connections (and hybrid a
+		// background lease loop); release them on exit.
+		defer limiter.Close()
+	}
+
+	// API proxy endpoints (protected by API key auth + rate limiting)
 	authMiddleware := auth.AuthMiddleware(keyService)
-	mux.Handle("/v1/chat/completions", authMiddleware(proxy))
-	mux.Handle("/v1/embeddings", authMiddleware(proxy))
-	mux.Handle("/v1/images", authMiddleware(proxy))
+	var api http.Handler = proxy
+	if limiter != nil {
+		api = ratelimit.RateLimitMiddleware(limiter, log)(proxy)
+	}
+	mux.Handle("/v1/chat/completions", authMiddleware(api))
+	mux.Handle("/v1/embeddings", authMiddleware(api))
+	mux.Handle("/v1/images", authMiddleware(api))
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

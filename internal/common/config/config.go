@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luxueq/aigateway/internal/ratelimit"
 	"github.com/spf13/viper"
 )
 
@@ -12,14 +13,14 @@ import (
 // Required sections use value types (always present with defaults).
 // Optional sections use pointer types (nil means "not configured").
 type Config struct {
-	Server    ServerConfig     `mapstructure:"server"`
-	Logging   LoggingConfig    `mapstructure:"logging"`
-	Providers *ProviderConfigs `mapstructure:"providers"`
-	Routing   *RoutingConfig   `mapstructure:"routing"`
-	Database  *DatabaseConfig  `mapstructure:"database"`
-	Redis     *RedisConfig     `mapstructure:"redis"`
-	Cache     *CacheConfig     `mapstructure:"cache"`
-	RateLimit *RateLimitConfig `mapstructure:"rate_limit"`
+	Server      ServerConfig      `mapstructure:"server"`
+	Logging     LoggingConfig     `mapstructure:"logging"`
+	Providers   *ProviderConfigs  `mapstructure:"providers"`
+	Routing     *RoutingConfig    `mapstructure:"routing"`
+	Database    *DatabaseConfig   `mapstructure:"database"`
+	Redis       *RedisConfig      `mapstructure:"redis"`
+	Cache       *CacheConfig      `mapstructure:"cache"`
+	RateLimiter *ratelimit.Config `mapstructure:"rate_limit"`
 }
 
 // RoutingConfig holds the router engine settings. Optional.
@@ -136,14 +137,6 @@ type CacheConfig struct {
 	MaxItems          int           `mapstructure:"max_items"`
 	SemanticEnabled   bool          `mapstructure:"semantic_enabled"`
 	SemanticThreshold float64       `mapstructure:"semantic_threshold"`
-}
-
-// RateLimitConfig holds rate limiting settings. Optional.
-type RateLimitConfig struct {
-	Enabled      bool          `mapstructure:"enabled"`
-	TokensPerSec int           `mapstructure:"tokens_per_sec"`
-	BurstSize    int           `mapstructure:"burst_size"`
-	Window       time.Duration `mapstructure:"window"`
 }
 
 // Load reads the configuration from the given file path.
