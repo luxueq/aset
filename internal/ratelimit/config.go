@@ -89,7 +89,11 @@ type FallbackConfig struct {
 
 // ShardedConfig holds configuration for sharded mode.
 type ShardedConfig struct {
-	Redis       *RedisConfig       `yaml:"redis"`
+	// Redis is a single Redis backing for a single-cluster deployment.
+	Redis *RedisConfig `yaml:"redis"`
+	// Clusters lists the Redis clusters to shard across — one shard per entry.
+	// Each entry may itself be a standalone or cluster RedisConfig.
+	Clusters    []*RedisConfig     `yaml:"clusters"`
 	Sharding    *ShardingConfig    `yaml:"sharding"`
 	Aggregation *AggregationConfig `yaml:"aggregation"`
 }

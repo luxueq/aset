@@ -50,8 +50,10 @@ func NewRateLimiter(cfg *Config) (RateLimiter, error) {
 		return NewHybridRateLimiter(redisLimiter, cfg.Hybrid, &cfg.Levels, nil)
 
 	case ModeSharded:
-		// TODO: Implement in Task 4.4
-		return nil, fmt.Errorf("sharded mode not yet implemented")
+		if cfg.Sharded == nil {
+			return nil, fmt.Errorf("sharded mode requires sharded config")
+		}
+		return NewShardedRateLimiterFromConfig(cfg.Sharded, &cfg.Levels)
 
 	default:
 		return nil, fmt.Errorf("unknown rate limit mode: %s", cfg.Mode)
