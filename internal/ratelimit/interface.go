@@ -35,6 +35,12 @@ type DimensionKeys struct {
 	Tenant string `json:"tenant"`  // e.g., "tenant:123"
 	Model  string `json:"model"`   // e.g., "model:openai:gpt-4"
 	APIKey string `json:"api_key"` // e.g., "key:abc123"
+
+	// RequestID identifies a single request. Sharded mode uses it to
+	// deterministically route a request to one of a tenant's shards so the
+	// admission and the post-stream correction land on the same shard.
+	// Ignored by the local/redis/hybrid implementations.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // LimitResult represents the result of a rate limit check.
