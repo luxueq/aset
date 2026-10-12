@@ -12,7 +12,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | Core Gateway | 3/6 | In Progress|  |
+| 1 | Core Gateway | 4/6 | In Progress|  |
 | 2 | SSE Agent Runtime | 流式转发 + 背压控制 + 重连 | SSE-01~05 (5) | 数十万并发 SSE 连接稳定运行 |
 | 3 | MCP Server | MCP 协议实现 + Tool 注册 | MCP-01~06 (6) | LLM 可通过 MCP 协议调用注册的 Tool |
 | 4 | Observability | 可观测性 + 成本追踪 | OBS-01~07 (7) | Grafana 可视化 token 用量/成本/延迟 |
@@ -244,7 +244,8 @@ Phase 8 (SDK) ←── 需要 API 稳定
 | MCP 2026-07-28 规范变更 | 中 | 按无状态设计，不依赖 session |
 | 多提供商协议差异 | 中 | Provider 适配器隔离差异 |
 | 沙箱资源泄漏 | 中 | 强制 TTL + cleanup |
+| 多实例路由状态单实例化 | 中 | 扩展时外置延迟/健康状态到 Redis/etcd，轮询改一致性哈希，集中式探活 |
 
 ---
 *Roadmap created: 2026-06-30*
-*Last updated: 2026-09-21 after completing 01-03 (router engine + failover + API keys)*
+*Last updated: 2026-10-10 after completing 01-04 (rate limiting)*
