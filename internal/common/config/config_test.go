@@ -14,7 +14,8 @@ func TestLoad_DefaultValues(t *testing.T) {
 server:
   port: 9090
 providers:
-  openai:
+  - name: openai
+    type: openai
     base_url: "https://api.openai.com/v1"
     api_key: "test-key"
 logging:
@@ -49,18 +50,18 @@ logging:
 		t.Error("Logging.SanitizeKeys should default to true")
 	}
 
-	// Optional: Providers (pointer type)
-	if cfg.Providers == nil {
-		t.Fatal("Providers is nil, expected non-nil since openai is configured")
+	// Optional: Providers (slice, empty = not configured)
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("len(Providers) = %d, want 1", len(cfg.Providers))
 	}
-	if cfg.Providers.OpenAI == nil {
-		t.Fatal("Providers.OpenAI is nil")
+	if cfg.Providers[0].Name != "openai" {
+		t.Errorf("Providers[0].Name = %q, want %q", cfg.Providers[0].Name, "openai")
 	}
-	if cfg.Providers.OpenAI.BaseURL != "https://api.openai.com/v1" {
-		t.Errorf("OpenAI.BaseURL = %q, want %q", cfg.Providers.OpenAI.BaseURL, "https://api.openai.com/v1")
+	if cfg.Providers[0].Type != "openai" {
+		t.Errorf("Providers[0].Type = %q, want %q", cfg.Providers[0].Type, "openai")
 	}
-	if cfg.Providers.Anthropic != nil {
-		t.Error("Providers.Anthropic should be nil (not configured)")
+	if cfg.Providers[0].BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("Providers[0].BaseURL = %q, want %q", cfg.Providers[0].BaseURL, "https://api.openai.com/v1")
 	}
 
 	// Optional: Database (pointer type, nil = not configured)
@@ -178,7 +179,8 @@ logging:
   level: info
   format: json
 providers:
-  openai:
+  - name: openai
+    type: openai
     base_url: "https://api.openai.com/v1"
     api_key: "sk-test"
     weight: 10
@@ -210,8 +212,8 @@ rate_limit:
 	}
 
 	// Verify all optional sections are non-nil
-	if cfg.Providers == nil {
-		t.Fatal("Providers should not be nil")
+	if len(cfg.Providers) == 0 {
+		t.Fatal("Providers should not be empty")
 	}
 	if cfg.Database == nil {
 		t.Fatal("Database should not be nil")

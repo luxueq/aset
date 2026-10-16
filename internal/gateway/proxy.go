@@ -12,8 +12,6 @@ import (
 
 	"github.com/luxueq/aigateway/internal/common/config"
 	"github.com/luxueq/aigateway/internal/provider"
-	"github.com/luxueq/aigateway/internal/provider/anthropic"
-	"github.com/luxueq/aigateway/internal/provider/openai"
 	"github.com/luxueq/aigateway/internal/router"
 	"go.uber.org/zap"
 )
@@ -47,19 +45,24 @@ func NewProxy(cfg *config.Config, log *zap.Logger) *Proxy {
 		retryConfig: DefaultRetryConfig(),
 	}
 
-	// Register configured providers
-	if cfg.Providers != nil {
-		if cfg.Providers.OpenAI != nil {
-			p.providers["openai"] = openai.NewOpenAIProvider(cfg.Providers.OpenAI)
-		}
-		if cfg.Providers.Anthropic != nil {
-			p.providers["anthropic"] = anthropic.NewAnthropicProvider(cfg.Providers.Anthropic)
-		}
-	}
+	// Register configured providers through the factory registry.
+	p.registerProviders(cfg)
 
 	p.initRouter(cfg)
 
 	return p
+}
+
+// registerProviders builds each configured provider via the factory registry.
+// Adding a new provider only needs a factory entry, not wiring here.
+func (p *Proxy) registerProviders(cfg *config.Config) {
+	for _, pc := range cfg.Providers {
+		factory, ok := providerFactories[pc.Type]
+		if !ok {
+			continue // no adapter implemented for this protocol type yet
+		}
+		p.providers[pc.Name] = factory(&pc)
+	}
 }
 
 // initRouter builds the routing engine from config: provider status
@@ -103,18 +106,13 @@ func (p *Proxy) providerStatus(name string) *router.ProviderStatus {
 		Healthy: true,
 		Weight:  1,
 	}
-	if p.config.Providers != nil {
-		for _, pc := range p.config.Providers.All() {
-			if pc.Config == nil {
-				continue
+	for _, pc := range p.config.Providers {
+		if pc.Name == name {
+			if pc.Weight > 0 {
+				st.Weight = pc.Weight
 			}
-			if pc.Name == name {
-				if pc.Config.Weight > 0 {
-					st.Weight = pc.Config.Weight
-				}
-				st.CostPer1K = pc.Config.CostPer1K
-				break
-			}
+			st.CostPer1K = pc.CostPer1K
+			break
 		}
 	}
 	return st

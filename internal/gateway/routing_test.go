@@ -22,9 +22,9 @@ func newRoutingProxy(t *testing.T, openaiURL, anthropicURL string, failover *con
 	t.Helper()
 
 	cfg := &config.Config{
-		Providers: &config.ProviderConfigs{
-			OpenAI:    &config.ProviderConfig{BaseURL: openaiURL, APIKey: "sk-test"},
-			Anthropic: &config.ProviderConfig{BaseURL: anthropicURL, APIKey: "ak-test"},
+		Providers: []config.ProviderConfig{
+			{Name: "openai", Type: "openai", BaseURL: openaiURL, APIKey: "sk-test"},
+			{Name: "anthropic", Type: "anthropic", BaseURL: anthropicURL, APIKey: "ak-test"},
 		},
 		Routing: &config.RoutingConfig{
 			DefaultStrategy: "roundrobin",
@@ -245,9 +245,9 @@ func TestProxy_RouterSeededFromConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Providers: &config.ProviderConfigs{
-			OpenAI:    &config.ProviderConfig{BaseURL: "http://o", APIKey: "k", Weight: 7, CostPer1K: 0.03},
-			Anthropic: &config.ProviderConfig{BaseURL: "http://a", APIKey: "k", CostPer1K: 0.01},
+		Providers: []config.ProviderConfig{
+			{Name: "openai", Type: "openai", BaseURL: "http://o", APIKey: "k", Weight: 7, CostPer1K: 0.03},
+			{Name: "anthropic", Type: "anthropic", BaseURL: "http://a", APIKey: "k", CostPer1K: 0.01},
 		},
 	}
 
@@ -289,9 +289,9 @@ func TestProxy_CostStrategySelectsCheapest(t *testing.T) {
 	defer anthropic.Close()
 
 	cfg := &config.Config{
-		Providers: &config.ProviderConfigs{
-			OpenAI:    &config.ProviderConfig{BaseURL: openai.URL, APIKey: "k", CostPer1K: 0.03},
-			Anthropic: &config.ProviderConfig{BaseURL: anthropic.URL, APIKey: "k", CostPer1K: 0.01},
+		Providers: []config.ProviderConfig{
+			{Name: "openai", Type: "openai", BaseURL: openai.URL, APIKey: "k", CostPer1K: 0.03},
+			{Name: "anthropic", Type: "anthropic", BaseURL: anthropic.URL, APIKey: "k", CostPer1K: 0.01},
 		},
 		Routing: &config.RoutingConfig{
 			DefaultStrategy: "roundrobin",

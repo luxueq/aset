@@ -3,11 +3,29 @@ server:
   read_timeout: 30s
   write_timeout: 120s
 
+# Provider list. Each entry is one "instance" of a protocol adapter.
+#
+#   name:  instance name referenced by routing.routes[].providers (e.g. "deepseek")
+#   type:  protocol adapter to use (e.g. "openai", "anthropic")
+#
+# Most vendors speak the OpenAI-compatible protocol, so adding one is pure
+# config — reuse type "openai" with a different name and base_url:
+#
+#   - name: deepseek
+#     type: openai
+#     base_url: "https://api.deepseek.com"
+#     api_key_env: "DEEPSEEK_API_KEY"
+#
+# Only a genuinely new protocol (e.g. native Gemini, AWS Bedrock) needs a new
+# adapter: implement provider.Provider, then register its factory in
+# internal/gateway/providers.go.
 providers:
-  openai:
+  - name: openai
+    type: openai
     base_url: "https://api.openai.com/v1"
     api_key: ""
-  anthropic:
+  - name: anthropic
+    type: anthropic
     base_url: "https://api.anthropic.com/v1"
     api_key: ""
 

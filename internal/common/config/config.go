@@ -15,7 +15,7 @@ import (
 type Config struct {
 	Server      ServerConfig      `mapstructure:"server"`
 	Logging     LoggingConfig     `mapstructure:"logging"`
-	Providers   *ProviderConfigs  `mapstructure:"providers"`
+	Providers   []ProviderConfig  `mapstructure:"providers"`
 	Routing     *RoutingConfig    `mapstructure:"routing"`
 	Database    *DatabaseConfig   `mapstructure:"database"`
 	Redis       *RedisConfig      `mapstructure:"redis"`
@@ -62,42 +62,15 @@ type LoggingConfig struct {
 	SanitizeFields []string `mapstructure:"sanitize_fields"`
 }
 
-// ProviderConfigs holds all provider configurations. Optional.
-// Each provider is a pointer — nil means that provider is not configured.
-type ProviderConfigs struct {
-	OpenAI    *ProviderConfig `mapstructure:"openai"`
-	Anthropic *ProviderConfig `mapstructure:"anthropic"`
-	Google    *ProviderConfig `mapstructure:"google"`
-	DeepSeek  *ProviderConfig `mapstructure:"deepseek"`
-	Dashscope *ProviderConfig `mapstructure:"dashscope"` // 通义千问
-	Qianfan   *ProviderConfig `mapstructure:"qianfan"`   // 文心一言
-	Spark     *ProviderConfig `mapstructure:"spark"`     // 讯飞星火
-	Zhipu     *ProviderConfig `mapstructure:"zhipu"`     // 智谱 GLM
-}
-
-// NamedProviderConfig pairs a provider name with its configuration.
-type NamedProviderConfig struct {
-	Name   string
-	Config *ProviderConfig
-}
-
-// All returns every configured provider (non-nil entries) with its name.
-// The order is fixed so router status seeding is deterministic.
-func (pc *ProviderConfigs) All() []NamedProviderConfig {
-	return []NamedProviderConfig{
-		{Name: "openai", Config: pc.OpenAI},
-		{Name: "anthropic", Config: pc.Anthropic},
-		{Name: "google", Config: pc.Google},
-		{Name: "deepseek", Config: pc.DeepSeek},
-		{Name: "dashscope", Config: pc.Dashscope},
-		{Name: "qianfan", Config: pc.Qianfan},
-		{Name: "spark", Config: pc.Spark},
-		{Name: "zhipu", Config: pc.Zhipu},
-	}
-}
-
-// ProviderConfig holds a single provider's settings.
+// ProviderConfig holds a single provider instance's settings.
+//
+// Name is the instance name used by routing (e.g. "deepseek"); Type selects
+// the protocol adapter (e.g. "openai", "anthropic"). Multiple instances can
+// share a Type — that is how OpenAI-compatible providers are wired with zero
+// new code, just a different base_url and api_key.
 type ProviderConfig struct {
+	Name       string            `mapstructure:"name"` // 实例名，路由引用
+	Type       string            `mapstructure:"type"` // 协议类型，选择 adapter
 	BaseURL    string            `mapstructure:"base_url"`
 	APIKey     string            `mapstructure:"api_key"`
 	APIKeyEnv  string            `mapstructure:"api_key_env"` // 从环境变量读取 key
