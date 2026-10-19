@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/luxueq/aigateway/internal/auth"
+	"github.com/luxueq/aigateway/internal/cache"
 	"github.com/luxueq/aigateway/internal/common/config"
 	"github.com/luxueq/aigateway/internal/common/logger"
 	"github.com/luxueq/aigateway/internal/gateway"
 	"github.com/luxueq/aigateway/internal/ratelimit"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -107,15 +109,68 @@ func main() {
 		defer limiter.Close()
 	}
 
-	// API proxy endpoints (protected by API key auth + rate limiting)
+	// Create response cache (optional: nil when not configured)
+	var responseCache *cache.Cache
+	var semanticCache *cache.SemanticCache
+	if cfg.Cache != nil && cfg.Cache.Enabled {
+		var l2 *cache.RedisCache
+		if cfg.Redis != nil {
+			l2, err = cache.NewRedisCacheFromConfig(cfg.Redis, cfg.Cache.TTL)
+			if err != nil {
+				log.Fatal("failed to create cache redis client", zap.Error(err))
+			}
+			defer l2.Close()
+		}
+		responseCache, err = cache.NewCache(cfg.Cache.MaxItems, l2, cfg.Cache.TTL)
+		if err != nil {
+			log.Fatal("failed to create cache", zap.Error(err))
+		}
+
+		if cfg.Cache.SemanticEnabled {
+			var embedder cache.Embedder
+			if cfg.Cache.EmbeddingBackend == "local" {
+				embedder = cache.NewLocalEmbedder(0, 0)
+			} else {
+				baseURL, apiKey := cfg.Cache.EmbeddingBaseURL, cfg.Cache.EmbeddingAPIKey
+				if baseURL == "" {
+					// Default to the first OpenAI-compatible provider instance.
+					for _, p := range cfg.Providers {
+						if p.Type == "openai" {
+							baseURL = p.BaseURL
+							if apiKey == "" {
+								apiKey = p.APIKey
+							}
+							break
+						}
+					}
+				}
+				embedder = cache.NewOpenAICompatibleEmbedder(baseURL, apiKey, cfg.Cache.EmbeddingModel)
+			}
+			semanticCache = cache.NewSemanticCache(
+				true,
+				embedder,
+				cache.NewMemoryVectorStore(cfg.Cache.MaxItems),
+				cfg.Cache.SemanticThreshold,
+				cfg.Cache.TTL,
+			)
+		}
+	}
+
+	// API proxy endpoints (protected by API key auth + caching + rate limiting)
 	authMiddleware := auth.AuthMiddleware(keyService)
 	var api http.Handler = proxy
 	if limiter != nil {
-		api = ratelimit.RateLimitMiddleware(limiter, log)(proxy)
+		api = ratelimit.RateLimitMiddleware(limiter, log)(api)
+	}
+	if responseCache != nil {
+		api = cache.CacheMiddleware(responseCache, semanticCache, log)(api)
 	}
 	mux.Handle("/v1/chat/completions", authMiddleware(api))
 	mux.Handle("/v1/embeddings", authMiddleware(api))
 	mux.Handle("/v1/images", authMiddleware(api))
+
+	// Metrics endpoint (cache metrics; full observability is Phase 4)
+	mux.Handle("GET /metrics", promhttp.Handler())
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

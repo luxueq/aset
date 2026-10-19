@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/luxueq/aigateway/internal/auth"
+	"github.com/luxueq/aigateway/internal/httputil"
 	"go.uber.org/zap"
 )
 
@@ -39,13 +39,11 @@ func RateLimitMiddleware(limiter RateLimiter, log *zap.Logger) func(http.Handler
 
 			// Peek the body to extract model and max_tokens, then restore it so
 			// the downstream proxy can read it again.
-			bodyBytes, err := io.ReadAll(r.Body)
+			bodyBytes, err := httputil.PeekBody(w, r, httputil.DefaultMaxBodyBytes)
 			if err != nil {
 				next.ServeHTTP(w, r)
 				return
 			}
-			_ = r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 			model, maxTokens := extractModelAndMaxTokens(bodyBytes)
 

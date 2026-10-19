@@ -110,6 +110,13 @@ type CacheConfig struct {
 	MaxItems          int           `mapstructure:"max_items"`
 	SemanticEnabled   bool          `mapstructure:"semantic_enabled"`
 	SemanticThreshold float64       `mapstructure:"semantic_threshold"`
+	// EmbeddingBackend selects the semantic-cache embedding source:
+	// "remote" (default, calls an external embedding model) or "local"
+	// (in-gateway n-gram hashing, no external call).
+	EmbeddingBackend string `mapstructure:"embedding_backend"`
+	EmbeddingBaseURL string `mapstructure:"embedding_base_url"`
+	EmbeddingAPIKey  string `mapstructure:"embedding_api_key"`
+	EmbeddingModel   string `mapstructure:"embedding_model"`
 }
 
 // Load reads the configuration from the given file path.
@@ -198,6 +205,12 @@ func applyOptionalDefaults(cfg *Config) {
 		}
 		if cfg.Cache.SemanticThreshold == 0 {
 			cfg.Cache.SemanticThreshold = 0.92
+		}
+		if cfg.Cache.EmbeddingBackend == "" {
+			cfg.Cache.EmbeddingBackend = "remote"
+		}
+		if cfg.Cache.EmbeddingModel == "" {
+			cfg.Cache.EmbeddingModel = "text-embedding-3-small"
 		}
 	}
 	if cfg.Routing != nil {
