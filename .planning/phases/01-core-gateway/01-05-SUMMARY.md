@@ -70,7 +70,7 @@ metrics:
 
 - **Tasks:** 5/5 (all implemented; see gaps below)
 - **Files:** 8 non-test + 4 test files in `internal/cache/`, plus `internal/httputil/body.go`
-- **New tests:** key, cache (L1/L2), middleware, semantic
+- **New tests:** key, cache (L1/L2), middleware, semantic (incl. per-tenant threshold + clear)
 - **Verification:** `go build ./...` ✅, `go vet ./...` clean, `go test ./...` 11 packages ok
 
 ## Task Verification Matrix
@@ -79,21 +79,21 @@ metrics:
 
 `ComputeCacheKey(req *provider.CanonicalRequest, cfg KeyConfig)` in `key.go` hashes model + messages (role+content), then temperature (`t:%.2f`) and seed (`s:%d`) unless listed in `cfg.IgnoreFields`. Returns a 64-char SHA-256 hex. `IncludeFields` is reserved (unused — the key has no other optional inputs today). Tests pin: same input → same key, differing temperature → differing key, ignored field → no effect, 64-char hex.
 
-### Task 5.2: L1 + L2 Two-Layer Cache — VERIFIED (minus clear endpoint)
+### Task 5.2: L1 + L2 Two-Layer Cache — VERIFIED
 
-`Cache` (`cache.go`) holds `l1 *lru.Cache[string,*CachedResponse]` + `l2 *RedisCache`. `Get` checks L1 → L2 (backfilling L1 on an L2 hit); `Set` writes both. `RedisCache` (`redis_cache.go`) stores `CachedResponse{StatusCode, Headers, Body}` as JSON with gzip when ≥1KB and only when it shrinks, skips bodies >1MB (big-key protection), and clears via `SCAN` + `UNLINK`. `Clear(ctx)` purges both layers. TTL is applied at the Redis `SET`; L1 eviction is LRU via `golang-lru`. **Gap:** the `DELETE /v1/cache/clear` HTTP endpoint called for by the acceptance criteria is not wired (see Known Stubs).
+`Cache` (`cache.go`) holds `l1 *lru.Cache[string,*CachedResponse]` + `l2 *RedisCache`. `Get` checks L1 → L2 (backfilling L1 on an L2 hit); `Set` writes both. `RedisCache` (`redis_cache.go`) stores `CachedResponse{StatusCode, Headers, Body}` as JSON with gzip when ≥1KB and only when it shrinks, skips bodies >1MB (big-key protection), and clears via `SCAN` + `UNLINK`. `Clear(ctx)` purges both layers. TTL is applied at the Redis `SET`; L1 eviction is LRU via `golang-lru`. The `DELETE /v1/cache/clear` endpoint clears both layers.
 
-### Task 5.3: Cache Middleware — VERIFIED (minus clear API)
+### Task 5.3: Cache Middleware — VERIFIED
 
 `CacheMiddleware` (`middleware.go`) peeks + restores the body (`httputil.PeekBody`), unmarshals `CanonicalRequest`, bypasses with `X-Cache: MISS` when `stream=true`, else computes the key, replays on exact hit (`X-Cache: HIT`), tries semantic on a deterministic miss, and otherwise captures the downstream response with `responseRecorder` and caches a 200. A hit skips both the limiter and the upstream proxy (middleware order: auth → cache → rate-limit → proxy).
 
-### Task 5.4: Semantic Cache — VERIFIED (minus per-tenant threshold)
+### Task 5.4: Semantic Cache — VERIFIED
 
-`SemanticCache` (`semantic.go`) is a facade over `Embedder` + `VectorStore`. `OpenAICompatibleEmbedder` targets any OpenAI-compatible `/embeddings` endpoint (OpenAI/DashScope/Zhipu/DeepSeek/Ollama); `LocalEmbedder` is a zero-dependency n-gram feature-hash fallback. `MemoryVectorStore` (`vector.go`) brute-forces cosine similarity with TTL + max-size cap. `X-Semantic-Cache: HIT` is stamped on a semantic hit. Semantic lookup is gated on `isDeterministic` (temperature == 0). **Gap:** threshold is global (config + runtime `SetThreshold`), not per-tenant (see Known Stubs).
+`SemanticCache` (`semantic.go`) is a facade over `Embedder` + `VectorStore`. `OpenAICompatibleEmbedder` targets any OpenAI-compatible `/embeddings` endpoint (OpenAI/DashScope/Zhipu/DeepSeek/Ollama); `LocalEmbedder` is a zero-dependency n-gram feature-hash fallback. `MemoryVectorStore` (`vector.go`) brute-forces cosine similarity with TTL + max-size cap. `X-Semantic-Cache: HIT` is stamped on a semantic hit. Semantic lookup is gated on `isDeterministic` (temperature == 0). Per-tenant thresholds are supported via `SetTenantThreshold` / the `semantic_thresholds` config map, resolved by `GetForTenant(ctx, tenant, text)`.
 
-### Task 5.5: Cache Metrics — PARTIAL
+### Task 5.5: Cache Metrics — VERIFIED
 
-`metrics.go` registers `aigateway_cache_hits_total`, `aigateway_cache_misses_total`, `aigateway_cache_latency_seconds`, all labeled `cache_type` (exact|semantic). `recordCacheHit` is called on both exact and semantic hits. **Gaps:** `recordCacheMiss` and the latency histogram are declared but never invoked (misses and lookup latency are not recorded); the plan's `model` label was dropped to `cache_type`-only (see Known Stubs).
+`metrics.go` registers `aigateway_cache_hits_total`, `aigateway_cache_misses_total`, `aigateway_cache_latency_seconds`, all labeled `cache_type` (exact|semantic). Hits, misses, and lookup latency are all recorded from the middleware. The plan's `model` label was dropped to `cache_type`-only (the acceptance criteria require only `cache_type`).
 
 ## Task Commits
 
@@ -113,16 +113,11 @@ metrics:
 
 ## Deviations from Plan
 
-- **`DELETE /v1/cache/clear` not wired**: `Cache.Clear`/`RedisCache.Clear` are implemented and tested, but no HTTP route exposes them. Deferred to a small follow-up (either a dedicated admin endpoint or a management command).
-- **per-tenant threshold not implemented**: the plan's "threshold configurable per tenant" is served only by a single global `semantic_threshold` plus runtime `SetThreshold`; per-tenant override has no data model in Phase 1.
-- **Metric labels simplified**: plan specified `["cache_type", "model"]`; implementation uses `["cache_type"]` only.
-- **Missing metric call sites**: `aigateway_cache_misses_total` and `aigateway_cache_latency_seconds` are declared and registered but never incremented/observed — the middleware records hits only.
+- **Metric labels simplified**: the plan's code example used `["cache_type", "model"]`; the implementation labels by `["cache_type"]` only. The acceptance criteria require only `cache_type`, so the `model` cardinality was deliberately dropped to keep `/metrics` cardinality low.
 
 ## Known Stubs
 
-- **`/v1/cache/clear` endpoint** — absent; manual cache invalidation is not reachable over HTTP.
-- **Cache miss + latency metrics** — declared but dead; `/metrics` currently exposes only exact/semantic hit counters.
-- **per-tenant semantic threshold** — global only.
+- **`DELETE /v1/cache/clear` is auth-protected but not permission-scoped**: any valid API key can clear the shared cache (the auth permission model has no `cache_admin` permission yet). Acceptable for Phase 1; revisit when governance lands.
 - **LocalEmbedder accuracy** — character n-gram hash, not true semantic similarity; it cannot equate "口渴" ≈ "想喝水" (no character overlap). It exists as a privacy-preserving fallback, documented as such.
 - **Body buffering cap** — `PeekBody` caps at 1 MiB and fails open (passes through unpeeked) on overflow; acceptable for chat-completion payloads, revisit for `/v1/images` large bodies.
 
@@ -133,12 +128,12 @@ Plan frontmatter lists `[GW-07, GW-08]`. **GW-07 (精确匹配缓存) is fully i
 ## Self-Check: PASSED
 
 - [x] `internal/cache/` — key.go, cache.go, redis_cache.go, middleware.go, semantic.go, embedder.go, vector.go, metrics.go exist
-- [x] 4 test files exist (key, cache, middleware, semantic)
+- [x] 4 test files exist (key, cache, middleware, semantic); semantic tests cover per-tenant threshold and clear
 - [x] `internal/httputil/body.go` (PeekBody) exists and is reused by ratelimit middleware
 - [x] `go build ./...` exit 0
 - [x] `go vet ./...` clean
 - [x] `go test ./...` — 11 packages ok, 0 failures
-- [x] Commits `d7170e1` (refactor) + `fed5751` (feat) exist on `feat/01-05-caching`
+- [x] Code landed on `main` — refactor (provider list) + feat (caching) + fix (acceptance-gap closure)
 
 ---
 *Phase: 01-core-gateway*

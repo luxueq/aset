@@ -153,3 +153,55 @@ func TestSemanticCache_SetThreshold_RuntimeTuning(t *testing.T) {
 		t.Fatal("expected hit after lowering threshold to 0.5")
 	}
 }
+
+func TestSemanticCache_PerTenantThreshold(t *testing.T) {
+	sc, _ := newTestSemanticCache(true, map[string][]float64{
+		"hello": {1, 0},
+		"hi":    {0.6, 0.8}, // cosine 0.6
+	}, 0.7) // global threshold above 0.6 → miss
+	ctx := context.Background()
+	sc.Set(ctx, "hello-key", "hello", &CachedResponse{Body: []byte("cached")})
+
+	// No tenant → global threshold (0.7) → miss.
+	if _, ok, _ := sc.GetForTenant(ctx, "", "hi"); ok {
+		t.Fatal("expected miss at global threshold 0.7")
+	}
+
+	// Tenant without an override → still global → miss.
+	if _, ok, _ := sc.GetForTenant(ctx, "unknown", "hi"); ok {
+		t.Fatal("expected miss for tenant without override")
+	}
+
+	// Tenant with a lower override (0.5 < 0.6) → hit.
+	sc.SetTenantThreshold("t1", 0.5)
+	if _, ok, _ := sc.GetForTenant(ctx, "t1", "hi"); !ok {
+		t.Fatal("expected hit for tenant t1 with threshold 0.5")
+	}
+
+	// Clearing the override (<= 0) falls back to global → miss again.
+	sc.SetTenantThreshold("t1", 0)
+	if _, ok, _ := sc.GetForTenant(ctx, "t1", "hi"); ok {
+		t.Fatal("expected miss after clearing tenant override")
+	}
+}
+
+func TestSemanticCache_Clear(t *testing.T) {
+	sc, _ := newTestSemanticCache(true, map[string][]float64{
+		"hello": {1, 0},
+		"hi":    {0.6, 0.8},
+	}, 0.5)
+	ctx := context.Background()
+	sc.Set(ctx, "hello-key", "hello", &CachedResponse{Body: []byte("cached")})
+
+	if _, ok, _ := sc.Get(ctx, "hi"); !ok {
+		t.Fatal("expected hit before clear")
+	}
+
+	if err := sc.Clear(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, _ := sc.Get(ctx, "hi"); ok {
+		t.Fatal("expected miss after clear")
+	}
+}

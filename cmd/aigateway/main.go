@@ -153,6 +153,9 @@ func main() {
 				cfg.Cache.SemanticThreshold,
 				cfg.Cache.TTL,
 			)
+			for tenant, threshold := range cfg.Cache.SemanticThresholds {
+				semanticCache.SetTenantThreshold(tenant, threshold)
+			}
 		}
 	}
 
@@ -168,6 +171,9 @@ func main() {
 	mux.Handle("/v1/chat/completions", authMiddleware(api))
 	mux.Handle("/v1/embeddings", authMiddleware(api))
 	mux.Handle("/v1/images", authMiddleware(api))
+
+	// Cache clear endpoint (admin: clears exact + semantic cache layers)
+	mux.Handle("DELETE /v1/cache/clear", authMiddleware(cacheClearHandler(responseCache, semanticCache, log)))
 
 	// Metrics endpoint (cache metrics; full observability is Phase 4)
 	mux.Handle("GET /metrics", promhttp.Handler())
@@ -203,6 +209,31 @@ func readyHandler(cfg *config.Config) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ready"}`))
+	}
+}
+
+// cacheClearHandler returns a handler that clears both cache layers (exact +
+// semantic). It 404s when caching is not configured so clients don't mistake a
+// no-op for success.
+func cacheClearHandler(c *cache.Cache, sc *cache.SemanticCache, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c == nil {
+			http.Error(w, "caching is not configured", http.StatusNotFound)
+			return
+		}
+		if err := c.Clear(r.Context()); err != nil {
+			log.Error("failed to clear exact cache", zap.Error(err))
+			http.Error(w, "cache clear failed", http.StatusInternalServerError)
+			return
+		}
+		if sc != nil {
+			if err := sc.Clear(r.Context()); err != nil {
+				log.Error("failed to clear semantic cache", zap.Error(err))
+				http.Error(w, "semantic cache clear failed", http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

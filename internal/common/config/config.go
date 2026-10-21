@@ -110,6 +110,9 @@ type CacheConfig struct {
 	MaxItems          int           `mapstructure:"max_items"`
 	SemanticEnabled   bool          `mapstructure:"semantic_enabled"`
 	SemanticThreshold float64       `mapstructure:"semantic_threshold"`
+	// SemanticThresholds holds per-tenant threshold overrides keyed by tenant
+	// ID; tenants absent here fall back to SemanticThreshold.
+	SemanticThresholds map[string]float64 `mapstructure:"semantic_thresholds"`
 	// EmbeddingBackend selects the semantic-cache embedding source:
 	// "remote" (default, calls an external embedding model) or "local"
 	// (in-gateway n-gram hashing, no external call).

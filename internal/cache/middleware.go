@@ -2,10 +2,13 @@ package cache
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/luxueq/aigateway/internal/auth"
 	"github.com/luxueq/aigateway/internal/httputil"
 	"github.com/luxueq/aigateway/internal/provider"
 	"go.uber.org/zap"
@@ -48,21 +51,30 @@ func CacheMiddleware(c *Cache, sc *SemanticCache, log *zap.Logger) func(http.Han
 			ctx := r.Context()
 			key := ComputeCacheKey(&req, KeyConfig{})
 
-			// Exact match.
+			// Exact match — record lookup latency and hit/miss.
+			exactStart := time.Now()
 			if resp, ok, err := c.Get(ctx, key); err == nil && ok {
+				cacheLatency.WithLabelValues("exact").Observe(time.Since(exactStart).Seconds())
 				writeCached(w, resp, false)
 				recordCacheHit("exact")
 				return
 			}
+			cacheLatency.WithLabelValues("exact").Observe(time.Since(exactStart).Seconds())
+			recordCacheMiss("exact")
 
 			// Semantic match — only for deterministic (temperature 0) requests.
 			text := extractMessageText(req.Messages)
 			if sc != nil && isDeterministic(&req) {
-				if resp, ok, err := sc.Get(ctx, text); err == nil && ok {
+				tenant := tenantFromContext(ctx)
+				semanticStart := time.Now()
+				if resp, ok, err := sc.GetForTenant(ctx, tenant, text); err == nil && ok {
+					cacheLatency.WithLabelValues("semantic").Observe(time.Since(semanticStart).Seconds())
 					writeCached(w, resp, true)
 					recordCacheHit("semantic")
 					return
 				}
+				cacheLatency.WithLabelValues("semantic").Observe(time.Since(semanticStart).Seconds())
+				recordCacheMiss("semantic")
 			}
 
 			// Miss: capture the downstream response and cache a 200.
@@ -146,4 +158,14 @@ func extractMessageText(msgs []provider.Message) string {
 		sb.WriteByte('\n')
 	}
 	return sb.String()
+}
+
+// tenantFromContext extracts the tenant ID from the authenticated API key in
+// the request context, or "" when there is none (health/unauthenticated paths).
+// It is what drives per-tenant semantic threshold resolution.
+func tenantFromContext(ctx context.Context) string {
+	if k := auth.GetAPIKeyFromContext(ctx); k != nil {
+		return k.TenantID
+	}
+	return ""
 }

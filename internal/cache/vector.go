@@ -15,6 +15,7 @@ import (
 type VectorStore interface {
 	Search(ctx context.Context, emb []float64, threshold float64) (*VectorResult, error)
 	Store(ctx context.Context, key string, emb []float64, resp *CachedResponse, ttl time.Duration) error
+	Clear(ctx context.Context) error
 }
 
 // VectorResult is a similarity-search hit.
@@ -90,6 +91,14 @@ func (m *MemoryVectorStore) Store(_ context.Context, key string, emb []float64, 
 		expires = now.Add(ttl)
 	}
 	m.entries[key] = &vectorEntry{embedding: emb, response: resp, expires: expires}
+	return nil
+}
+
+// Clear removes every entry from the store.
+func (m *MemoryVectorStore) Clear(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = make(map[string]*vectorEntry)
 	return nil
 }
 
